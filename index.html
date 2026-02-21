@@ -1,1 +1,2009 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Chess</title>
+    <link rel="stylesheet" href="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.css">
+    <style>
+        * { box-sizing: border-box; }
+        body { font-family: sans-serif; text-align: center; background: #111; color: white; margin: 0; padding: 0; display: flex; flex-direction: column; min-height: 100vh; }
 
+        /* ── GAME AREA (board at top) ── */
+        #game-area { width: 100%; max-width: 480px; margin: 0 auto; padding: 6px 6px 0; }
+
+        /* ── SCORE BAR ── */
+        #score-bar { display: none; background: #1e1e1e; border-radius: 8px; padding: 5px 14px; margin-bottom: 4px; }
+        .score-inner { display: flex; justify-content: space-between; align-items: center; }
+        .score-label { color: #666; font-size: 10px; text-transform: uppercase; }
+        .score-val { font-size: 18px; font-weight: bold; }
+        .score-sep { color: #333; font-size: 20px; }
+
+        /* ── PLAYER ROWS ── */
+        .player-row { display: flex; justify-content: space-between; align-items: center; padding: 5px 8px; background: #1a1a1a; border-radius: 6px; margin: 3px 0; }
+        .player-name { font-size: 14px; font-weight: bold; color: #eee; display: flex; align-items: center; gap: 6px; }
+        .color-dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; border: 1px solid #555; flex-shrink: 0; }
+        .color-dot.white { background: #f0f0f0; }
+        .color-dot.black { background: #444; border-color: #888; }
+        .timer { font-size: 17px; font-family: monospace; background: #0d0d0d; padding: 3px 9px; border-radius: 4px; font-weight: bold; color: #eee; }
+
+        /* ── MATERIAL ── */
+        .material-row { display: flex; align-items: center; gap: 1px; flex-wrap: wrap; min-height: 14px; flex: 1; margin: 0 6px; }
+        .mat-piece { width: 14px; height: 14px; display: inline-block; background-size: contain; background-repeat: no-repeat; background-position: center; opacity: 0.85; }
+        .mat-score { font-size: 10px; font-weight: bold; color: #aaa; margin-left: 2px; }
+        .mat-score.positive { color: #81c784; }
+
+        /* ── BOARD ── */
+        #board { width: 100%; max-width: 480px; margin: 0 auto; touch-action: manipulation; }
+        #board.pieces-flipped img { transform: rotate(180deg); transition: transform 0.25s ease; }
+        #board:not(.pieces-flipped) img { transform: rotate(0deg); transition: transform 0.25s ease; }
+
+        /* ── STATUS ── */
+        #status { margin: 4px 0; font-weight: bold; padding: 6px; background: #1a1a1a; border-radius: 6px; font-size: 13px; color: #aaa; }
+
+        /* ── VOICE BAR ── */
+        #voice-bar { display: none; background: #1b3a1b; border: 1px solid #2d6a2d; border-radius: 8px; padding: 6px 12px; margin: 4px 0; align-items: center; justify-content: space-between; gap: 8px; }
+        #voice-bar.show { display: flex; }
+        .voice-status { font-size: 12px; color: #66bb6a; display: flex; align-items: center; gap: 5px; }
+        .voice-dot { width: 8px; height: 8px; border-radius: 50%; background: #66bb6a; animation: pulse-green 1.2s ease-in-out infinite; }
+        @keyframes pulse-green { 0%,100%{opacity:1;} 50%{opacity:0.3;} }
+        .voice-btns { display: flex; gap: 6px; }
+        .voice-btns button { padding: 4px 9px; font-size: 12px; border-radius: 5px; }
+        .btn-mute { background: #555; }
+        .btn-mute.muted { background: #c62828; }
+        .btn-hangup { background: #c62828; }
+
+        /* ── ACTION BAR ── */
+        .actions { display: flex; justify-content: center; gap: 6px; margin: 5px 0 6px; flex-wrap: wrap; }
+        .action-btn { padding: 7px 13px; background: #2a2a2a; color: #ccc; border: 1px solid #333; border-radius: 20px; font-weight: bold; cursor: pointer; font-size: 12px; }
+        .action-btn:active { opacity: 0.7; }
+        .action-btn.danger { background: #1e0a0a; color: #ef9a9a; border-color: #4a1010; }
+        .action-btn.secondary { background: #0a1020; color: #90caf9; border-color: #1a3050; }
+
+        /* ── BOTTOM UI ── */
+        #bottom-ui { max-width: 480px; margin: 0 auto; width: 100%; padding: 0 6px 80px; }
+
+        /* ── SETUP PANEL ── */
+        #setup-panel { background: #1a1a1a; border-radius: 14px; padding: 20px 16px; margin-top: 8px; }
+        .setup-title { font-size: 28px; font-weight: bold; margin-bottom: 4px; }
+        .setup-subtitle { font-size: 13px; color: #666; margin-bottom: 16px; }
+        .setup-row { display: flex; gap: 8px; margin-bottom: 10px; }
+        .setup-row input { flex: 1; padding: 11px 12px; border-radius: 8px; border: 1px solid #333; background: #111; color: white; font-size: 14px; }
+        .setup-row button { padding: 11px 18px; border-radius: 8px; background: #4CAF50; color: white; border: none; font-weight: bold; font-size: 14px; cursor: pointer; }
+        .local-btn { width: 100%; padding: 10px; background: #1e1e1e; color: #888; border: 1px solid #2a2a2a; border-radius: 8px; font-size: 13px; cursor: pointer; margin-top: 6px; }
+        .local-btn:hover { background: #252525; color: #aaa; }
+
+        /* ── LOBBY ── */
+        #setup-lobby { }
+        .lobby-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+        .lobby-you { display: flex; align-items: center; gap: 10px; }
+        .lobby-avatar { width: 38px; height: 38px; border-radius: 50%; background: #4CAF50; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 17px; }
+        .lobby-name { font-size: 16px; font-weight: bold; }
+        .lobby-status { font-size: 11px; color: #4CAF50; }
+        .lobby-connect { display: flex; flex-direction: column; gap: 8px; }
+        .lobby-connect input, .lobby-connect select { padding: 11px 12px; border-radius: 8px; border: 1px solid #333; background: #111; color: white; font-size: 14px; width: 100%; }
+        .connect-btn { width: 100%; padding: 11px; background: #4CAF50; color: white; border: none; border-radius: 8px; font-weight: bold; font-size: 14px; cursor: pointer; }
+
+        /* ── INVITE BOX ── */
+        #invite-link-box { background: #111; border: 1px solid #2a2a2a; border-radius: 10px; padding: 14px; }
+        .invite-code-wrap { text-align: center; padding: 8px 0; }
+        .logout-btn { background: #252525; color: #888; border: 1px solid #333; border-radius: 6px; padding: 6px 10px; font-size: 12px; cursor: pointer; }
+
+        /* ── IN-GAME PANEL ── */
+        #ingame-panel { margin-top: 6px; }
+
+        /* ── CHAT ── */
+        #chat-section { background: #1a1a1a; border-radius: 12px; overflow: hidden; margin-bottom: 6px; }
+        .chat-header { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; background: #222; cursor: pointer; user-select: none; }
+        .chat-header-left { display: flex; align-items: center; gap: 8px; font-weight: bold; font-size: 14px; }
+        .chat-badge { background: #f44336; color: white; font-size: 10px; border-radius: 10px; padding: 1px 6px; display: none; }
+        #chat-messages { height: 120px; overflow-y: auto; padding: 8px; text-align: left; background: #111; font-size: 13px; }
+        .chat-msg { margin-bottom: 4px; line-height: 1.4; }
+        .you  { color: #4CAF50; }
+        .them { color: #64b5f6; }
+        .sys  { color: #555; font-style: italic; }
+        .chat-input-row { display: flex; gap: 6px; padding: 8px; }
+        .chat-input-row input { flex: 1; padding: 8px 10px; border-radius: 6px; border: 1px solid #333; background: #222; color: white; font-size: 13px; }
+        .chat-input-row button { padding: 8px 14px; background: #4CAF50; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 13px; }
+
+        /* ── FRIENDS BUTTON ── */
+        #friends-btn { position: fixed; bottom: 20px; right: 16px; z-index: 500; background: #1e1e1e; border: 1px solid #333; border-radius: 50%; width: 52px; height: 52px; font-size: 22px; cursor: pointer; box-shadow: 0 4px 16px rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; padding: 0; }
+        .friends-badge { position: absolute; top: -4px; right: -4px; background: #4CAF50; color: white; font-size: 10px; font-weight: bold; border-radius: 10px; padding: 1px 5px; }
+
+        /* ── DRAWER ── */
+        #drawer-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 600; }
+        #drawer-overlay.show { display: block; }
+        #friends-drawer { position: fixed; top: 0; right: -320px; width: 310px; height: 100vh; background: #1a1a1a; z-index: 700; transition: right 0.28s ease; display: flex; flex-direction: column; box-shadow: -6px 0 30px rgba(0,0,0,0.7); }
+        #friends-drawer.open { right: 0; }
+        .drawer-header { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; background: #222; border-bottom: 1px solid #2a2a2a; }
+        .drawer-header h3 { margin: 0; font-size: 16px; }
+        .drawer-close { background: none; border: none; color: #666; font-size: 20px; cursor: pointer; padding: 0; }
+        .drawer-section { padding: 12px 14px; border-bottom: 1px solid #222; }
+        .drawer-section label { font-size: 10px; color: #555; display: block; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px; }
+        .login-row { display: flex; gap: 6px; }
+        .login-row input { flex: 1; padding: 8px 10px; border-radius: 6px; border: 1px solid #333; background: #111; color: white; font-size: 13px; }
+        .login-row button, .add-friend-row button, .spectate-row button { padding: 8px 12px; font-size: 12px; background: #4CAF50; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; }
+        .logged-in-row { display: flex; align-items: center; gap: 8px; background: #111; border-radius: 8px; padding: 8px 10px; }
+        .logged-in-avatar { width: 32px; height: 32px; border-radius: 50%; background: #4CAF50; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 14px; flex-shrink: 0; }
+        .logged-in-name { flex: 1; font-weight: bold; font-size: 14px; }
+        .logged-in-status { font-size: 11px; color: #4CAF50; }
+        .add-friend-row, .spectate-row { display: flex; gap: 6px; }
+        .add-friend-row input, .spectate-row input { flex: 1; padding: 8px 10px; border-radius: 6px; border: 1px solid #333; background: #111; color: white; font-size: 13px; }
+        #friend-list { flex: 1; overflow-y: auto; }
+        .friend-item { display: flex; align-items: center; gap: 10px; padding: 10px 14px; cursor: pointer; transition: background 0.15s; }
+        .friend-item:hover { background: #222; }
+        .friend-avatar { width: 36px; height: 36px; border-radius: 50%; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 15px; color: white; }
+        .friend-info { flex: 1; min-width: 0; text-align: left; }
+        .friend-name { font-size: 14px; font-weight: bold; color: #eee; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .friend-status { font-size: 11px; margin-top: 2px; }
+        .friend-status.online { color: #4CAF50; }
+        .friend-status.playing { color: #FFB300; }
+        .friend-status.offline { color: #444; }
+        .status-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+        .status-dot.online { background: #4CAF50; }
+        .status-dot.playing { background: #FFB300; animation: pulse-green 1.2s infinite; }
+        .status-dot.offline { background: #333; }
+        .friend-actions { display: flex; gap: 4px; }
+        .friend-actions button { padding: 4px 8px; font-size: 11px; border-radius: 4px; border: none; cursor: pointer; font-weight: bold; color: white; }
+        .btn-play-friend { background: #4CAF50; }
+        .btn-spectate-friend { background: #1565C0; }
+        .btn-remove-friend { background: #2a2a2a; color: #555; }
+        .empty-friends { text-align: center; padding: 30px 14px; color: #444; font-size: 13px; }
+
+        /* ── SPECTATE BANNER ── */
+        #spectate-banner { display: none; background: #0d1433; border-bottom: 2px solid #1a237e; padding: 7px 14px; text-align: center; font-size: 13px; color: #7986cb; }
+        #spectate-banner.show { display: block; }
+        #spectate-banner b { color: #fff; }
+        #spectate-banner button { background: #c62828; color: white; border: none; font-size: 11px; padding: 3px 8px; margin-left: 10px; border-radius: 4px; cursor: pointer; }
+
+        /* ── POPUPS ── */
+        button { cursor: pointer; }
+        #call-popup { display: none; position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: #1b3a1b; border: 2px solid #4CAF50; border-radius: 14px; padding: 14px 20px; z-index: 1000; text-align: center; box-shadow: 0 4px 20px rgba(0,0,0,0.8); min-width: 260px; }
+        #call-popup.show { display: block; }
+        #call-popup p { margin: 0 0 10px; color: #ccc; font-size: 13px; }
+        #call-popup .call-btns { display: flex; gap: 10px; justify-content: center; }
+        #call-popup .call-btns button { padding: 9px 18px; border: none; border-radius: 6px; font-weight: bold; font-size: 13px; color: white; }
+        #game-end-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.82); z-index: 900; justify-content: center; align-items: center; }
+        #game-end-overlay.show { display: flex; }
+        #game-end-popup { background: #1e1e1e; border-radius: 18px; padding: 28px 24px; width: 290px; text-align: center; box-shadow: 0 8px 40px rgba(0,0,0,0.9); }
+        .result-icon { font-size: 48px; margin-bottom: 10px; }
+        .result-title { font-size: 22px; font-weight: bold; margin-bottom: 6px; }
+        .result-sub { font-size: 13px; color: #666; margin-bottom: 20px; }
+        .popup-buttons { display: flex; flex-direction: column; gap: 10px; }
+        .popup-buttons button { width: 100%; padding: 12px; font-size: 14px; border-radius: 8px; border: none; font-weight: bold; color: white; }
+        .btn-rematch { background: #4CAF50; }
+        .btn-newgame { background: #2196F3; }
+        .btn-close { background: #333; }
+
+        /* ── PROMOTION ── */
+        #promo-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 1100; justify-content: center; align-items: center; }
+        #promo-overlay.show { display: flex; }
+        #promo-box { background: #1e1e1e; border-radius: 14px; padding: 20px; text-align: center; box-shadow: 0 8px 40px rgba(0,0,0,0.9); }
+        #promo-box p { margin: 0 0 14px; font-size: 14px; color: #aaa; }
+        .promo-choices { display: flex; gap: 10px; justify-content: center; }
+        .promo-btn { width: 64px; height: 64px; border: 2px solid #333; border-radius: 10px; background: #111; cursor: pointer; background-size: 80%; background-repeat: no-repeat; background-position: center; transition: border-color 0.15s, transform 0.1s; }
+        .promo-btn:hover { border-color: #4CAF50; transform: scale(1.08); }
+
+        /* ── BOARD HIGHLIGHTS ── */
+        .square-55d63 { position: relative; }
+        .highlight-square { box-shadow: inset 0 0 0 4px rgba(255,235,80,0.9) !important; }
+        .last-move { background-color: rgba(255,240,120,0.35) !important; }
+        .premove-from { background-color: rgba(255,120,120,0.22) !important; }
+        .premove-to { background-color: rgba(255,120,120,0.15) !important; }
+        .premove-select { box-shadow: inset 0 0 0 4px rgba(255,160,160,0.75) !important; }
+        .ghost-piece { position: absolute; inset: 0; background-size: contain; background-repeat: no-repeat; background-position: center; opacity: 0.42; pointer-events: none; z-index: 5; }
+        .premove-loop-badge { display: inline-block; background: rgba(255,160,160,0.25); border: 1px solid rgba(255,140,140,0.5); border-radius: 10px; font-size: 10px; padding: 1px 6px; margin-left: 4px; color: rgba(255,180,180,0.9); }
+        .king-in-check { background: radial-gradient(ellipse at center, rgba(255,110,110,0.92) 0%, rgba(210,50,50,0.5) 55%, transparent 80%) !important; box-shadow: inset 0 0 0 3px rgba(255,130,130,0.95) !important; animation: check-pulse 0.8s ease-in-out infinite alternate; }
+        @keyframes check-pulse { from { box-shadow: inset 0 0 0 3px rgba(255,130,130,0.9); } to { box-shadow: inset 0 0 0 4px rgba(255,170,170,1), 0 0 14px 4px rgba(255,80,80,0.55); } }
+        .legal-move::after { content:''; position:absolute; width:25%; height:25%; background:rgba(0,0,0,0.28); border-radius:50%; top:50%; left:50%; transform:translate(-50%,-50%); pointer-events:none; z-index:10; }
+        .legal-move-capture::after { content:''; position:absolute; width:80%; height:80%; background:transparent; border:5px solid rgba(0,0,0,0.28); border-radius:50%; top:50%; left:50%; transform:translate(-50%,-50%); pointer-events:none; z-index:10; }
+    </style>
+</head>
+<body>
+
+<!-- ═══ FRIENDS BUTTON ═══ -->
+<button id="friends-btn" onclick="toggleDrawer()">
+    👥 Friends <span class="friends-badge" id="friends-badge">0</span>
+</button>
+
+<!-- ═══ DRAWER OVERLAY ═══ -->
+<div id="drawer-overlay" onclick="toggleDrawer()"></div>
+
+<!-- ═══ FRIENDS DRAWER ═══ -->
+<div id="friends-drawer">
+    <div class="drawer-header">
+        <h3>👥 Friends</h3>
+        <button class="drawer-close" onclick="toggleDrawer()">✕</button>
+    </div>
+
+    <!-- Login -->
+    <div class="drawer-section" id="drawer-login-section">
+        <label>Your Account</label>
+        <div id="drawer-logged-out">
+            <div class="login-row">
+                <input type="text" id="drawer-username-input" placeholder="Enter username…" maxlength="32" onkeydown="if(event.key==='Enter')drawerLogin()">
+                <button onclick="drawerLogin()">Login</button>
+            </div>
+            <div style="font-size:11px;color:#555;margin-top:6px;">Username is saved in your browser</div>
+        </div>
+        <div id="drawer-logged-in" style="display:none;">
+            <div class="logged-in-row">
+                <div class="logged-in-avatar" id="drawer-avatar">?</div>
+                <div>
+                    <div class="logged-in-name" id="drawer-display-name">—</div>
+                    <div class="logged-in-status">🟢 Online</div>
+                </div>
+                <button class="logout-btn" onclick="drawerLogout()">Logout</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add Friend -->
+    <div class="drawer-section">
+        <label>Add Friend</label>
+        <div class="add-friend-row">
+            <input type="text" id="add-friend-input" placeholder="Friend's username…" maxlength="32" onkeydown="if(event.key==='Enter')addFriend()">
+            <button onclick="addFriend()">Add</button>
+        </div>
+    </div>
+
+    <!-- Spectate by Username -->
+    <div class="drawer-section">
+        <label>Spectate a Game</label>
+        <div class="spectate-row">
+            <input type="text" id="spectate-input" placeholder="Username to watch…" maxlength="32" onkeydown="if(event.key==='Enter')spectateByInput()">
+            <button onclick="spectateByInput()">Watch</button>
+        </div>
+    </div>
+
+    <!-- Friend List -->
+    <div id="friend-list">
+        <div class="empty-friends" id="empty-friends-msg">No friends added yet.<br>Add a friend above!</div>
+    </div>
+</div>
+
+<!-- ═══ SPECTATE BANNER ═══ -->
+<div id="spectate-banner">
+    👁 Spectating <b id="spectate-banner-name">—</b>
+    <button onclick="stopSpectating()">✕ Stop</button>
+</div>
+
+<!-- ═══ BOARD AREA (always at top) ═══ -->
+<div id="game-area">
+    <!-- Score bar (online only) -->
+    <div id="score-bar">
+        <div class="score-inner">
+            <div><div class="score-label" id="score-label-opp">Opponent</div><div class="score-val" id="score-opp">0</div></div>
+            <div class="score-sep">–</div>
+            <div><div class="score-label">Draw</div><div class="score-val" id="score-draw">0</div></div>
+            <div class="score-sep">–</div>
+            <div><div class="score-label" id="score-label-me">You</div><div class="score-val" id="score-me">0</div></div>
+        </div>
+    </div>
+
+    <!-- Opponent row -->
+    <div class="player-row">
+        <div class="player-name"><span class="color-dot" id="opp-dot"></span><span id="opp-name">Opponent</span></div>
+        <div class="material-row" id="opp-material"></div>
+        <div id="opponent-timer" class="timer">--:--</div>
+    </div>
+
+    <!-- Board -->
+    <div id="board"></div>
+
+    <!-- You row -->
+    <div class="player-row">
+        <div class="player-name"><span class="color-dot" id="me-dot"></span><span id="me-name">You</span></div>
+        <div class="material-row" id="me-material"></div>
+        <div id="player-timer" class="timer">--:--</div>
+    </div>
+
+    <!-- Status -->
+    <div id="status">Tap ⚙️ below to connect or play locally</div>
+
+    <!-- Voice call bar -->
+    <div id="voice-bar">
+        <div class="voice-status"><div class="voice-dot"></div><span id="voice-status-text">In call</span></div>
+        <div class="voice-btns">
+            <button class="btn-mute" id="mute-btn" onclick="toggleMute()">🎙 Mute</button>
+            <button class="btn-hangup" onclick="hangupCall()">📵 End</button>
+        </div>
+    </div>
+
+    <!-- In-game action bar (shown when playing) -->
+    <div class="actions" id="game-actions">
+        <button onclick="flipBoard()" class="action-btn">🔄 Flip</button>
+        <button class="action-btn secondary" id="call-btn" onclick="startCall()" style="display:none;">📞 Call</button>
+        <button class="action-btn" onclick="exportPGN()">📋 PGN</button>
+        <button class="action-btn danger" onclick="resignGame()">🏳 Resign</button>
+    </div>
+</div>
+
+<!-- ═══ BOTTOM UI ═══ -->
+<div id="bottom-ui">
+
+    <!-- Setup panel (hidden when in game) -->
+    <div id="setup-panel">
+        <!-- Not logged in state -->
+        <div id="setup-login" style="display:none;">
+            <div class="setup-title">♟ Chess</div>
+            <div class="setup-subtitle">Enter a username to play online</div>
+            <div class="setup-row">
+                <input type="text" id="my-key-input" placeholder="Your username…" maxlength="32" onkeydown="if(event.key==='Enter')setMyKey()">
+                <button onclick="setMyKey()">Play</button>
+            </div>
+            <button class="local-btn" onclick="startLocalGame()">🎮 Local 2-Player</button>
+        </div>
+
+        <!-- Logged in / lobby state -->
+        <div id="setup-lobby" style="display:none;">
+            <div class="lobby-header">
+                <div class="lobby-you">
+                    <div class="lobby-avatar" id="lobby-avatar">?</div>
+                    <div>
+                        <div class="lobby-name" id="lobby-name">—</div>
+                        <div class="lobby-status">🟢 Online</div>
+                    </div>
+                </div>
+                <button class="logout-btn" onclick="drawerLogout()">Logout</button>
+            </div>
+            <div class="lobby-connect">
+                <input type="text" id="friend-id" placeholder="Friend's username…" onkeydown="if(event.key==='Enter')connectToFriend()">
+                <select id="time-control">
+                    <option value="0">∞ Unlimited</option>
+                    <option value="60">1 min</option>
+                    <option value="180">3 min</option>
+                    <option value="300" selected>5 min</option>
+                    <option value="600">10 min</option>
+                </select>
+                <button class="connect-btn" onclick="connectToFriend()">⚡ Connect &amp; Play</button>
+                <button class="connect-btn" id="create-link-btn" onclick="createInviteLink()" style="background:#1565C0;">🔗 Create Game Link</button>
+            </div>
+
+            <!-- Invite link box -->
+            <div id="invite-link-box" style="display:none;">
+                <div class="invite-code-wrap">
+                    <div style="font-size:10px;color:#666;margin-bottom:3px;text-transform:uppercase;letter-spacing:.5px;">Game Code</div>
+                    <div id="invite-code-display" style="font-size:22px;font-weight:bold;color:#4CAF50;letter-spacing:3px;font-family:monospace;"></div>
+                    <div style="font-size:11px;color:#555;margin-top:2px;">Friend types this code to join</div>
+                </div>
+                <div style="display:flex;gap:6px;margin-top:8px;">
+                    <button onclick="copyGameCode()" id="copy-code-btn" style="flex:1;padding:8px;font-size:12px;">📋 Copy Code</button>
+                    <button onclick="shareInviteLink()" style="flex:1;padding:8px;font-size:12px;background:#4CAF50;">📤 Share Link</button>
+                    <button onclick="cancelInviteLink()" style="padding:8px 12px;font-size:12px;background:#333;">✕</button>
+                </div>
+                <input type="hidden" id="invite-link-input">
+                <div id="invite-waiting" style="font-size:11px;color:#FFB300;margin-top:6px;display:none;">⏳ Waiting for friend…</div>
+            </div>
+
+            <button class="local-btn" onclick="startLocalGame()">🎮 Local 2-Player</button>
+        </div>
+    </div>
+
+    <!-- In-game bottom panel (shown when playing) -->
+    <div id="ingame-panel" style="display:none;">
+        <!-- Chat -->
+        <div id="chat-section">
+            <div class="chat-header" onclick="toggleChat()">
+                <div class="chat-header-left"><span>💬 Chat</span><span class="chat-badge" id="chat-badge">●</span></div>
+                <span id="chat-arrow" style="font-size:12px;color:#aaa;">▼</span>
+            </div>
+            <div id="chat-body" style="display:none;">
+                <div id="chat-messages"></div>
+                <div class="chat-input-row">
+                    <input type="text" id="chat-input" placeholder="Message…" maxlength="200" onkeydown="if(event.key==='Enter')sendChat()">
+                    <button onclick="sendChat()">Send</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<!-- ═══ FRIENDS BUTTON ═══ -->
+<button id="friends-btn" onclick="toggleDrawer()">
+    👥 <span class="friends-badge" id="friends-badge" style="display:none;">0</span>
+</button>
+
+<!-- ═══ DRAWER OVERLAY ═══ -->
+<div id="drawer-overlay" onclick="toggleDrawer()"></div>
+
+<!-- ═══ FRIENDS DRAWER ═══ -->
+<div id="friends-drawer">
+    <div class="drawer-header">
+        <h3>👥 Friends</h3>
+        <button class="drawer-close" onclick="toggleDrawer()">✕</button>
+    </div>
+    <div class="drawer-section" id="drawer-login-section">
+        <label>Your Account</label>
+        <div id="drawer-logged-out">
+            <div class="login-row">
+                <input type="text" id="drawer-username-input" placeholder="Enter username…" maxlength="32" onkeydown="if(event.key==='Enter')drawerLogin()">
+                <button onclick="drawerLogin()">Login</button>
+            </div>
+            <div style="font-size:11px;color:#555;margin-top:6px;">Saved in your browser</div>
+        </div>
+        <div id="drawer-logged-in" style="display:none;">
+            <div class="logged-in-row">
+                <div class="logged-in-avatar" id="drawer-avatar">?</div>
+                <div>
+                    <div class="logged-in-name" id="drawer-display-name">—</div>
+                    <div class="logged-in-status">🟢 Online</div>
+                </div>
+                <button class="logout-btn" onclick="drawerLogout()">Logout</button>
+            </div>
+        </div>
+    </div>
+    <div class="drawer-section">
+        <label>Add Friend</label>
+        <div class="add-friend-row">
+            <input type="text" id="add-friend-input" placeholder="Friend's username…" maxlength="32" onkeydown="if(event.key==='Enter')addFriend()">
+            <button onclick="addFriend()">Add</button>
+        </div>
+    </div>
+    <div class="drawer-section">
+        <label>Spectate a Game</label>
+        <div class="spectate-row">
+            <input type="text" id="spectate-input" placeholder="Username to watch…" maxlength="32" onkeydown="if(event.key==='Enter')spectateByInput()">
+            <button onclick="spectateByInput()">Watch</button>
+        </div>
+    </div>
+    <div id="friend-list">
+        <div class="empty-friends" id="empty-friends-msg">No friends added yet.<br>Add a friend above!</div>
+    </div>
+</div>
+
+<!-- ═══ INCOMING CALL POPUP ═══ -->
+<div id="call-popup">
+    <p>📞 <b id="caller-name">Opponent</b> is calling…</p>
+    <div class="call-btns">
+        <button style="background:#4CAF50;" onclick="answerCall()">✅ Answer</button>
+        <button style="background:#f44336;" onclick="rejectCall()">❌ Decline</button>
+    </div>
+</div>
+
+<!-- ═══ GAME END POPUP ═══ -->
+<div id="game-end-overlay">
+    <div id="game-end-popup">
+        <div class="result-icon" id="popup-icon">♟️</div>
+        <div class="result-title" id="popup-title">Game Over</div>
+        <div class="result-sub" id="popup-sub"></div>
+        <div class="popup-buttons" id="popup-buttons"></div>
+    </div>
+</div>
+
+<!-- ═══ PROMOTION PICKER ═══ -->
+<div id="promo-overlay">
+    <div id="promo-box">
+        <p>Choose promotion piece</p>
+        <div class="promo-choices" id="promo-choices"></div>
+    </div>
+</div>
+
+<!-- Hidden audio -->
+<audio id="remote-audio" autoplay playsinline></audio>
+
+<script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
+<script src="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
+<script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+<script>
+/* ══════════════════════════════════════════════
+   STATE
+══════════════════════════════════════════════ */
+let board, game = new Chess();
+let peer = null, conn = null, myColor = null;
+let myKey = null, oppKey = null;
+
+// Normal move state
+let sourceSquare = null;
+
+// ── PREMOVE STATE ──
+// Queue of premoves: [{from, to, promo, pieceType, pieceColor, loop}, ...]
+//   loop: if true, this premove re-queues itself after firing (repeating premove)
+// Simulated Chess() reflects premoves on top of real board for ghost rendering.
+let premoveQueue = [];
+let pmSelectSrc  = null;
+let pmSimGame    = null;
+
+// ── PROMOTION STATE ──
+let pendingPromoMove = null; // {from, to} waiting for user to pick piece
+
+// Timer state
+let timeControl = 0, timers = {w:0,b:0}, timerInterval = null;
+let score = {me:0,draw:0,opp:0};
+let chatOpen = false;
+
+// Voice call state
+let localStream = null, activeCall = null, isMuted = false;
+let incomingCallObj = null;
+
+/* ══════════════════════════════════════════════
+   FRIENDS & PRESENCE SYSTEM
+══════════════════════════════════════════════ */
+let friendList      = [];       // [{username, status:'online'|'playing'|'offline'}]
+let presenceConns   = {};       // {username: PeerJS DataConnection} — ping channels
+let spectateConn    = null;     // DataConnection to the player we're watching
+let isSpectating    = false;
+let myStatus        = 'online'; // 'online' | 'playing'
+
+// ── Persist login ──
+function loadSavedLogin() {
+    const saved = localStorage.getItem('chess_username');
+    if (saved) {
+        document.getElementById('drawer-username-input').value = saved;
+        drawerLogin(true); // silent login
+    }
+    const savedFriends = localStorage.getItem('chess_friends');
+    if (savedFriends) {
+        try { friendList = JSON.parse(savedFriends); } catch(e) { friendList = []; }
+    }
+}
+
+function drawerLogin(silent=false) {
+    const inp = document.getElementById('drawer-username-input');
+    const key = sanitizeKey(inp.value.trim());
+    if (key.length < 3) { if(!silent) alert('Username must be 3+ characters.'); return; }
+
+    document.getElementById('my-key-input').value = key;
+    setMyKey();
+
+    localStorage.setItem('chess_username', key);
+    document.getElementById('drawer-logged-out').style.display = 'none';
+    document.getElementById('drawer-logged-in').style.display = 'block';
+    document.getElementById('drawer-display-name').textContent = key;
+    document.getElementById('drawer-avatar').textContent = key[0].toUpperCase();
+
+    // Show lobby in setup panel
+    document.getElementById('setup-login').style.display = 'none';
+    document.getElementById('setup-lobby').style.display = 'block';
+    document.getElementById('lobby-name').textContent = key;
+    document.getElementById('lobby-avatar').textContent = key[0].toUpperCase();
+
+    setTimeout(pingAllFriends, 1200);
+    renderFriendList();
+    if (!silent) toggleDrawer();
+}
+
+function drawerLogout() {
+    localStorage.removeItem('chess_username');
+    document.getElementById('drawer-logged-out').style.display = 'block';
+    document.getElementById('drawer-logged-in').style.display = 'none';
+    document.getElementById('drawer-username-input').value = '';
+    document.getElementById('setup-login').style.display = 'block';
+    document.getElementById('setup-lobby').style.display = 'none';
+    resetKey();
+    Object.values(presenceConns).forEach(c => { try { c.close(); } catch(e){} });
+    presenceConns = {};
+}
+
+// ── Friend CRUD ──
+function addFriend() {
+    const inp = document.getElementById('add-friend-input');
+    const key = sanitizeKey(inp.value.trim());
+    if (key.length < 3) return alert('Enter a valid username.');
+    if (key === myKey) return alert("That's you!");
+    if (friendList.find(f => f.username === key)) return alert('Already in your list.');
+    friendList.push({ username: key, status: 'offline' });
+    saveFriends();
+    inp.value = '';
+    pingFriend(key);
+    renderFriendList();
+}
+
+function removeFriend(username) {
+    friendList = friendList.filter(f => f.username !== username);
+    saveFriends();
+    if (presenceConns[username]) {
+        try { presenceConns[username].close(); } catch(e){}
+        delete presenceConns[username];
+    }
+    renderFriendList();
+}
+
+function saveFriends() {
+    localStorage.setItem('chess_friends', JSON.stringify(friendList));
+}
+
+// ── Presence Pinging ──
+// We open a lightweight PeerJS data connection to each friend.
+// They respond with their current status. We keep the channel open
+// so status updates arrive in real-time.
+function pingAllFriends() {
+    friendList.forEach(f => pingFriend(f.username));
+}
+
+function pingFriend(username) {
+    if (!peer || presenceConns[username]) return;
+    try {
+        const c = peer.connect(username, { label: 'presence', reliable: false });
+        c.on('open', () => {
+            presenceConns[username] = c;
+            c.send({ type: 'presence_ping', from: myKey });
+        });
+        c.on('data', data => {
+            if (data.type === 'presence_pong') {
+                updateFriendStatus(username, data.status);
+            }
+            if (data.type === 'game_update') {
+                // Spectate: receive board FEN + player names
+                if (isSpectating && spectateConn === c) {
+                    try { board.position(data.fen, true); } catch(e) {}
+                    if (data.white && data.black) {
+                        document.getElementById('opp-name').textContent = data.black;
+                        document.getElementById('me-name').textContent  = data.white;
+                        document.getElementById('opp-dot').className = 'color-dot black';
+                        document.getElementById('me-dot').className  = 'color-dot white';
+                    }
+                }
+            }
+        });
+        c.on('close', () => {
+            delete presenceConns[username];
+            updateFriendStatus(username, 'offline');
+        });
+        c.on('error', () => {
+            delete presenceConns[username];
+            updateFriendStatus(username, 'offline');
+        });
+    } catch(e) {}
+}
+
+function updateFriendStatus(username, status) {
+    const f = friendList.find(f => f.username === username);
+    if (f) { f.status = status; saveFriends(); }
+    renderFriendList();
+    updateFriendsBadge();
+}
+
+function updateFriendsBadge() {
+    const onlineCount = friendList.filter(f => f.status !== 'offline').length;
+    const badge = document.getElementById('friends-badge');
+    if (onlineCount > 0) {
+        badge.textContent = onlineCount;
+        badge.style.display = 'inline';
+    } else {
+        badge.style.display = 'none';
+    }
+}
+
+// Broadcast our status to all connected presence channels
+function broadcastMyStatus(status) {
+    myStatus = status;
+    Object.values(presenceConns).forEach(c => {
+        if (c && c.open) {
+            try { c.send({ type: 'presence_pong', status }); } catch(e){}
+        }
+    });
+}
+
+// Broadcast a board FEN to all spectators watching us
+function broadcastGameUpdate(fen) {
+    Object.values(presenceConns).forEach(c => {
+        if (c && c.open) {
+            try {
+                c.send({
+                    type: 'game_update',
+                    fen,
+                    white: myColor === 'w' ? (myKey || 'White') : (oppKey || 'Black'),
+                    black: myColor === 'b' ? (myKey || 'Black') : (oppKey || 'White')
+                });
+            } catch(e){}
+        }
+    });
+}
+
+// ── Spectating ──
+function spectateUser(username) {
+    if (!peer) return alert('Please log in first.');
+    if (username === myKey) return alert("You can't spectate yourself!");
+
+    const f = friendList.find(f => f.username === username);
+    if (f && f.status === 'offline') return alert(username + ' is offline.');
+
+    // Use existing presence conn or open a new one
+    let c = presenceConns[username];
+    if (!c || !c.open) {
+        c = peer.connect(username, { label: 'presence', reliable: true });
+        presenceConns[username] = c;
+        c.on('open', () => {
+            c.send({ type: 'spectate_request', from: myKey });
+        });
+    } else {
+        c.send({ type: 'spectate_request', from: myKey });
+    }
+
+    c.on('data', data => {
+        if (data.type === 'presence_pong') updateFriendStatus(username, data.status);
+        if (data.type === 'game_update') {
+            if (isSpectating) {
+                try {
+                    const g = new Chess(data.fen);
+                    board.position(data.fen, false);
+                    // Show correct player names — white always at bottom in spectate
+                    if (data.white && data.black) {
+                        document.getElementById('opp-name').textContent = data.black;
+                        document.getElementById('me-name').textContent  = data.white;
+                        document.getElementById('opp-dot').className = 'color-dot black';
+                        document.getElementById('me-dot').className  = 'color-dot white';
+                    }
+                } catch(e) {}
+            }
+        }
+        if (data.type === 'spectate_denied') {
+            alert(username + ' is not currently in a game.');
+            stopSpectating();
+        }
+    });
+
+    isSpectating = true;
+    spectateConn = c;
+    document.getElementById('spectate-banner-name').textContent = username;
+    document.getElementById('spectate-banner').classList.add('show');
+    toggleDrawer();
+}
+
+function spectateByInput() {
+    const inp = document.getElementById('spectate-input');
+    const key = sanitizeKey(inp.value.trim());
+    if (key.length < 3) return alert('Enter a valid username.');
+    inp.value = '';
+    // Add to friends temporarily if not already there
+    if (!friendList.find(f => f.username === key)) {
+        friendList.push({ username: key, status: 'offline' });
+        saveFriends();
+        renderFriendList();
+    }
+    spectateUser(key);
+}
+
+function stopSpectating() {
+    isSpectating = false;
+    spectateConn = null;
+    document.getElementById('spectate-banner').classList.remove('show');
+    resetGame(0);
+    exitGameMode();
+}
+
+// ── Render ──
+function renderFriendList() {
+    const list = document.getElementById('friend-list');
+    const empty = document.getElementById('empty-friends-msg');
+
+    // Remove old friend items (keep empty msg)
+    list.querySelectorAll('.friend-item').forEach(el => el.remove());
+
+    if (friendList.length === 0) {
+        empty.style.display = 'block';
+        updateFriendsBadge();
+        return;
+    }
+    empty.style.display = 'none';
+
+    // Sort: online/playing first
+    const sorted = [...friendList].sort((a,b) => {
+        const rank = {playing:0, online:1, offline:2};
+        return (rank[a.status]||2) - (rank[b.status]||2);
+    });
+
+    sorted.forEach(f => {
+        const statusLabel = f.status === 'playing' ? '♟ In a game' :
+                            f.status === 'online'  ? '🟢 Online'   : '⚫ Offline';
+        const colors = ['#e53935','#1E88E5','#8E24AA','#00897B','#F4511E','#6D4C41'];
+        const color = colors[f.username.charCodeAt(0) % colors.length];
+
+        const item = document.createElement('div');
+        item.className = 'friend-item';
+        item.innerHTML = `
+            <div class="status-dot ${f.status}"></div>
+            <div class="friend-avatar" style="background:${color}">${f.username[0].toUpperCase()}</div>
+            <div class="friend-info">
+                <div class="friend-name">${f.username}</div>
+                <div class="friend-status ${f.status}">${statusLabel}</div>
+            </div>
+            <div class="friend-actions">
+                ${f.status === 'playing' ? `<button class="btn-spectate-friend" onclick="spectateUser('${f.username}')">👁 Watch</button>` : ''}
+                ${f.status !== 'offline' ? `<button class="btn-play-friend" onclick="playFriend('${f.username}')">▶ Play</button>` : ''}
+                <button class="btn-remove-friend" onclick="removeFriend('${f.username}')">✕</button>
+            </div>`;
+        list.appendChild(item);
+    });
+
+    updateFriendsBadge();
+}
+
+function playFriend(username) {
+    document.getElementById('friend-id').value = username;
+    toggleDrawer();
+    connectToFriend();
+}
+
+// ── Drawer toggle ──
+function toggleDrawer() {
+    const drawer = document.getElementById('friends-drawer');
+    const overlay = document.getElementById('drawer-overlay');
+    const isOpen = drawer.classList.contains('open');
+    drawer.classList.toggle('open');
+    overlay.classList.toggle('show');
+    if (!isOpen) {
+        // Re-ping friends on open
+        pingAllFriends();
+        renderFriendList();
+    }
+}
+
+/* ══════════════════════════════════════════════
+   SOUNDS
+══════════════════════════════════════════════ */
+const sounds = {
+    move:    new Audio('https://images.chesscomfiles.com/chess-themes/sounds/_MP3_/default/move-self.mp3'),
+    capture: new Audio('https://images.chesscomfiles.com/chess-themes/sounds/_MP3_/default/capture.mp3'),
+    check:   new Audio('https://images.chesscomfiles.com/chess-themes/sounds/_MP3_/default/move-check.mp3'),
+    gameEnd: new Audio('https://images.chesscomfiles.com/chess-themes/sounds/_MP3_/default/game-end.mp3'),
+    notify:  new Audio('https://images.chesscomfiles.com/chess-themes/sounds/_MP3_/default/move-opponent.mp3'),
+    premove: new Audio('https://images.chesscomfiles.com/chess-themes/sounds/_MP3_/default/premove.mp3')
+};
+function playSound(mv) {
+    let s = sounds.move;
+    if (game.in_checkmate()||game.in_draw()) s=sounds.gameEnd;
+    else if (game.in_check()) s=sounds.check;
+    else if (mv&&(mv.flags.includes('c')||mv.flags.includes('e'))) s=sounds.capture;
+    s.currentTime=0; s.play().catch(()=>{});
+}
+function triggerInvalidFeedback() { if(navigator.vibrate) navigator.vibrate([60,40,60]); }
+
+/* ══════════════════════════════════════════════
+   USERNAME / KEY
+══════════════════════════════════════════════ */
+function sanitizeKey(r){ return r.toLowerCase().replace(/[^a-z0-9_-]/g,'').slice(0,32); }
+
+function setMyKey() {
+    const key = sanitizeKey(document.getElementById('my-key-input').value.trim());
+    if (key.length < 3) return alert('Username must be 3+ characters (letters, numbers, _ -).');
+    if (peer) { peer.destroy(); peer=null; }
+    myKey = key;
+    updatePlayerLabels();
+
+    peer = new Peer(key);
+    peer.on('error', e => {
+        if (e.type==='unavailable-id') { alert('That username is taken. Try another.'); resetKey(); }
+    });
+    peer.on('connection', c => {
+        // Handle presence / spectate connections (label = 'presence')
+        if (c.label === 'presence') {
+            c.on('open', () => {
+                c.on('data', data => {
+                    if (data.type === 'presence_ping') {
+                        // Respond with our current status
+                        c.send({ type: 'presence_pong', status: myStatus });
+                        // Store this channel so we can broadcast to them
+                        const frm = data.from;
+                        if (frm && !presenceConns[frm]) presenceConns[frm] = c;
+                    }
+                    if (data.type === 'spectate_request') {
+                        if (myStatus === 'playing' && game.history().length > 0) {
+                            c.send({
+                                type: 'game_update',
+                                fen: game.fen(),
+                                white: myColor === 'w' ? (myKey || 'White') : (oppKey || 'White'),
+                                black: myColor === 'b' ? (myKey || 'Black') : (oppKey || 'Black')
+                            });
+                            const frm = data.from || 'spectator';
+                            presenceConns[frm] = c;
+                        } else {
+                            c.send({ type: 'spectate_denied' });
+                        }
+                    }
+                });
+            });
+            return;
+        }
+
+        // Regular game connection
+        conn = c;
+        myColor = 'b';
+        board.orientation('black');
+        setupDataConnection();
+        document.getElementById('call-btn').style.display = 'inline-block';
+        updateScoreUI();
+        // Friend joined via link — hide waiting UI
+        document.getElementById('invite-link-box').style.display = 'none';
+        document.getElementById('create-link-btn').style.display = 'block';
+        enterGameMode();
+    });
+    // Answer incoming voice calls
+    peer.on('call', incomingCall => {
+        incomingCallObj = incomingCall;
+        document.getElementById('caller-name').textContent = oppKey || 'Opponent';
+        document.getElementById('call-popup').classList.add('show');
+    });
+}
+
+function resetKey() {
+    if (peer) { peer.destroy(); peer=null; }
+    myKey=null;
+    document.getElementById('my-key-input').value='';
+    updatePlayerLabels();
+}
+
+function copyMyId() {
+    navigator.clipboard.writeText(myKey||'').then(()=>{});
+}
+
+/* ══════════════════════════════════════════════
+   INVITE LINK SYSTEM
+══════════════════════════════════════════════ */
+function createInviteLink() {
+    if (!myKey) {
+        const name = prompt('Enter your username first:');
+        if (!name) return;
+        document.getElementById('my-key-input').value = name;
+        document.getElementById('drawer-username-input').value = name;
+        setMyKey();
+        setTimeout(createInviteLink, 900);
+        return;
+    }
+    const tc = document.getElementById('time-control').value;
+
+    // Game code = just the username (friend types it in the username field)
+    document.getElementById('invite-code-display').textContent = myKey;
+
+    // Use hash so it works on file://, claude.ai, and any hosted URL
+    const base = window.location.href.split('#')[0].split('?')[0];
+    const link = `${base}#join:${myKey}:${tc}`;
+
+    document.getElementById('invite-link-input').value = link;
+    document.getElementById('invite-link-box').style.display = 'block';
+    document.getElementById('create-link-btn').style.display = 'none';
+    document.getElementById('invite-waiting').style.display = 'block';
+}
+
+function copyGameCode() {
+    const code = document.getElementById('invite-code-display').textContent;
+    navigator.clipboard.writeText(code).then(() => {
+        const btn = document.getElementById('copy-code-btn');
+        btn.textContent = '✓ Copied!';
+        setTimeout(() => btn.textContent = 'Copy', 2000);
+    });
+}
+
+function copyInviteLink() {
+    const link = document.getElementById('invite-link-input').value;
+    navigator.clipboard.writeText(link).then(() => {
+        const btn = document.getElementById('copy-link-btn');
+        btn.textContent = '✓ Copied!';
+        setTimeout(() => btn.textContent = 'Copy', 2000);
+    });
+}
+
+function shareInviteLink() {
+    const link = document.getElementById('invite-link-input').value;
+    if (navigator.share) {
+        navigator.share({
+            title: '♟ Chess – Join my game!',
+            text: `${myKey} challenged you to chess! Click to join:`,
+            url: link
+        }).catch(() => copyInviteLink());
+    } else {
+        copyInviteLink();
+    }
+}
+
+function cancelInviteLink() {
+    document.getElementById('invite-link-box').style.display = 'none';
+    document.getElementById('create-link-btn').style.display = 'block';
+    document.getElementById('invite-waiting').style.display = 'none';
+    history.replaceState(null, '', window.location.pathname + window.location.search);
+}
+
+// Called on page load — if URL hash has join info, show the join prompt
+function checkInviteLink() {
+    const hash = window.location.hash; // e.g. #join:alice:300
+    if (!hash.startsWith('#join:')) return;
+
+    // Clean hash immediately
+    history.replaceState(null, '', window.location.pathname + window.location.search);
+
+    const parts = hash.slice(1).split(':'); // ['join', 'alice', '300']
+    if (parts.length < 2) return;
+    const host = sanitizeKey(parts[1]);
+    const tc   = parseInt(parts[2]) || 0;
+    if (!host || host.length < 3) return;
+
+    showJoinPrompt(host, tc);
+}
+
+function showJoinPrompt(host, tc) {
+    // Build a nice overlay invite card
+    const overlay = document.createElement('div');
+    overlay.id = 'join-invite-overlay';
+    overlay.style.cssText = `
+        position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:2000;
+        display:flex;align-items:center;justify-content:center;
+    `;
+    const tcLabel = tc === 0 ? 'Unlimited' : tc === 60 ? '1 min' : tc === 180 ? '3 min' : tc === 300 ? '5 min' : tc === 600 ? '10 min' : `${tc}s`;
+    overlay.innerHTML = `
+        <div style="background:#2a2a2a;border-radius:18px;padding:28px 24px;width:300px;text-align:center;box-shadow:0 8px 40px rgba(0,0,0,0.8);">
+            <div style="font-size:42px;margin-bottom:10px;">♟️</div>
+            <div style="font-size:18px;font-weight:bold;color:#eee;margin-bottom:6px;"><b style="color:#4CAF50">${host}</b> challenged you!</div>
+            <div style="font-size:13px;color:#aaa;margin-bottom:20px;">Time control: ${tcLabel}</div>
+            <div style="font-size:12px;color:#888;margin-bottom:12px;">Enter your username to join:</div>
+            <input type="text" id="join-username-input" placeholder="Your username…" maxlength="32"
+                style="width:100%;padding:10px;border-radius:8px;border:none;background:#111;color:white;font-size:14px;margin-bottom:12px;text-align:center;"
+                onkeydown="if(event.key==='Enter')acceptInvite('${host}',${tc})">
+            <div style="display:flex;gap:8px;">
+                <button onclick="acceptInvite('${host}',${tc})" style="flex:1;padding:12px;font-size:14px;border-radius:8px;background:#4CAF50;">✅ Join Game</button>
+                <button onclick="document.getElementById('join-invite-overlay').remove()" style="flex:1;padding:12px;font-size:14px;border-radius:8px;background:#555;">✕ Decline</button>
+            </div>
+        </div>`;
+    document.body.appendChild(overlay);
+
+    // Pre-fill saved username
+    const saved = localStorage.getItem('chess_username');
+    if (saved) document.getElementById('join-username-input').value = saved;
+    document.getElementById('join-username-input').focus();
+}
+
+function acceptInvite(host, tc) {
+    const inp = document.getElementById('join-username-input');
+    const key = sanitizeKey(inp.value.trim());
+    if (key.length < 3) { inp.style.border='1px solid #f44336'; inp.focus(); return; }
+    if (key === sanitizeKey(host)) { inp.style.border='1px solid #f44336'; alert("Pick a different username than the host!"); return; }
+
+    // Remove overlay
+    const ov = document.getElementById('join-invite-overlay');
+    if (ov) ov.remove();
+
+    // Set time control
+    document.getElementById('time-control').value = String(tc);
+
+    // Set username inputs
+    document.getElementById('my-key-input').value = key;
+    document.getElementById('drawer-username-input').value = key;
+
+    // Save login
+    localStorage.setItem('chess_username', key);
+    document.getElementById('drawer-logged-out').style.display = 'none';
+    document.getElementById('drawer-logged-in').style.display = 'block';
+    document.getElementById('drawer-display-name').textContent = key;
+    document.getElementById('drawer-avatar').textContent = key[0].toUpperCase();
+
+    // Destroy any old peer, create fresh one, connect on open
+    if (peer) { try { peer.destroy(); } catch(e){} peer = null; }
+    myKey = key;
+    updatePlayerLabels();
+
+    const newPeer = new Peer(key);
+    peer = newPeer;
+
+    peer.on('error', e => {
+        if (e.type === 'unavailable-id') alert('Username "' + key + '" is taken. Please refresh and try another.');
+    });
+
+    peer.on('open', () => {
+        // Now actually connect to the host
+        document.getElementById('friend-id').value = host;
+        connectToFriend();
+    });
+
+    // Also handle incoming game connections (in case host connects to us)
+    peer.on('connection', c => {
+        if (c.label === 'presence') return;
+        conn = c; myColor = 'b';
+        board.orientation('black');
+        setupDataConnection();
+        document.getElementById('call-btn').style.display = 'inline-block';
+        updateScoreUI();
+        document.getElementById('invite-link-box').style.display = 'none';
+        document.getElementById('create-link-btn').style.display = 'block';
+        enterGameMode();
+    });
+    peer.on('call', incomingCall => {
+        incomingCallObj = incomingCall;
+        document.getElementById('caller-name').textContent = oppKey || 'Opponent';
+        document.getElementById('call-popup').classList.add('show');
+    });
+}
+
+/* ══════════════════════════════════════════════
+   GAME MODE UI SWITCHING
+══════════════════════════════════════════════ */
+function enterGameMode() {
+    document.getElementById('setup-panel').style.display = 'none';
+    document.getElementById('ingame-panel').style.display = 'block';
+    document.getElementById('game-actions').style.display = 'flex';
+    if (conn) {
+        document.getElementById('chat-section').style.display = 'block';
+        showScoreBar(true);
+    }
+}
+
+function exitGameMode() {
+    document.getElementById('setup-panel').style.display = 'block';
+    document.getElementById('ingame-panel').style.display = 'none';
+    document.getElementById('chat-section').style.display = 'none';
+    showScoreBar(false);
+    // Show correct lobby state
+    if (myKey) {
+        document.getElementById('setup-login').style.display = 'none';
+        document.getElementById('setup-lobby').style.display = 'block';
+    } else {
+        document.getElementById('setup-login').style.display = 'block';
+        document.getElementById('setup-lobby').style.display = 'none';
+    }
+}
+
+function startLocalGame() {
+    myColor = null; conn = null; oppKey = null;
+    resetGame(0);
+    document.getElementById('me-name').textContent  = 'White';
+    document.getElementById('opp-name').textContent = 'Black';
+    document.getElementById('me-dot').className  = 'color-dot white';
+    document.getElementById('opp-dot').className = 'color-dot black';
+    document.getElementById('status').innerText = 'White to move';
+    enterGameMode();
+}
+
+function updatePlayerLabels() {
+    const me = myKey||'You', opp = oppKey||'Opponent';
+    document.getElementById('me-name').textContent  = me;
+    document.getElementById('opp-name').textContent = opp;
+    if (myColor==='w') {
+        document.getElementById('me-dot').className  = 'color-dot white';
+        document.getElementById('opp-dot').className = 'color-dot black';
+    } else if (myColor==='b') {
+        document.getElementById('me-dot').className  = 'color-dot black';
+        document.getElementById('opp-dot').className = 'color-dot white';
+    } else {
+        document.getElementById('me-dot').className  = 'color-dot white';
+        document.getElementById('opp-dot').className = 'color-dot black';
+    }
+    document.getElementById('score-label-me').textContent  = me;
+    document.getElementById('score-label-opp').textContent = opp;
+}
+
+/* ══════════════════════════════════════════════
+   VOICE CALL  (WebRTC via PeerJS)
+══════════════════════════════════════════════ */
+async function getLocalStream() {
+    if (localStream) return localStream;
+    localStream = await navigator.mediaDevices.getUserMedia({audio:true, video:false});
+    return localStream;
+}
+
+async function startCall() {
+    if (!conn||!conn.open) return alert('Connect to a friend first.');
+    if (activeCall) return;
+    try {
+        const stream = await getLocalStream();
+        const call = peer.call(oppKey, stream);
+        setupCallHandlers(call, 'Calling ' + (oppKey||'opponent') + '…');
+        conn.send({type:'call_ring'});
+    } catch(e) { alert('Microphone access denied.'); }
+}
+
+async function answerCall() {
+    document.getElementById('call-popup').classList.remove('show');
+    if (!incomingCallObj) return;
+    try {
+        const stream = await getLocalStream();
+        incomingCallObj.answer(stream);
+        setupCallHandlers(incomingCallObj, 'In call with ' + (oppKey||'opponent'));
+        incomingCallObj = null;
+    } catch(e) { alert('Microphone access denied.'); }
+}
+
+function rejectCall() {
+    document.getElementById('call-popup').classList.remove('show');
+    if (incomingCallObj) { incomingCallObj.close(); incomingCallObj=null; }
+    if (conn&&conn.open) conn.send({type:'call_rejected'});
+}
+
+function setupCallHandlers(call, statusText) {
+    activeCall = call;
+    call.on('stream', remoteStream => {
+        document.getElementById('remote-audio').srcObject = remoteStream;
+        document.getElementById('voice-status-text').textContent = 'In call with ' + (oppKey||'opponent');
+        document.getElementById('voice-bar').classList.add('show');
+        document.getElementById('call-btn').style.display = 'none';
+    });
+    call.on('close', () => { cleanupCall(); addChatMessage('Call ended.','sys'); });
+    call.on('error', () => { cleanupCall(); });
+    // Optimistically show "calling…" until stream arrives
+    document.getElementById('voice-status-text').textContent = statusText;
+}
+
+function toggleMute() {
+    if (!localStream) return;
+    isMuted = !isMuted;
+    localStream.getAudioTracks().forEach(t => t.enabled = !isMuted);
+    const btn = document.getElementById('mute-btn');
+    btn.textContent = isMuted ? '🔇 Unmute' : '🎙 Mute';
+    btn.classList.toggle('muted', isMuted);
+}
+
+function hangupCall() {
+    if (activeCall) activeCall.close();
+    cleanupCall();
+    if (conn&&conn.open) conn.send({type:'call_ended'});
+    addChatMessage('You ended the call.','sys');
+}
+
+function cleanupCall() {
+    activeCall = null; isMuted = false;
+    document.getElementById('voice-bar').classList.remove('show');
+    document.getElementById('call-btn').style.display = conn&&conn.open ? 'inline-block' : 'none';
+    document.getElementById('mute-btn').textContent = '🎙 Mute';
+    document.getElementById('mute-btn').classList.remove('muted');
+    document.getElementById('remote-audio').srcObject = null;
+}
+
+/* ══════════════════════════════════════════════
+   PEER DATA CONNECTION
+══════════════════════════════════════════════ */
+function connectToFriend() {
+    if (!peer) return alert('Set your username first.');
+    const id = sanitizeKey(document.getElementById('friend-id').value.trim());
+    if (!id||id.length<3) return alert('Enter your friend\'s username.');
+    if (id===myKey) return alert('You cannot connect to yourself!');
+
+    const c = peer.connect(id);
+    c.on('open', () => {
+        conn=c; myColor='w'; oppKey=id;
+        board.orientation('white');
+        setupDataConnection();
+        const tc = parseInt(document.getElementById('time-control').value);
+        resetGame(tc);
+        conn.send({type:'init', time:tc, username:myKey});
+        document.getElementById('call-btn').style.display='inline-block';
+        updatePlayerLabels(); updateScoreUI();
+        addChatMessage('Connected! Good luck 🤝','sys');
+        broadcastMyStatus('playing');
+        enterGameMode();
+    });
+    c.on('error', ()=>alert('Could not connect. Check username and try again.'));
+}
+
+function setupDataConnection() {
+    conn.on('data', data => {
+        switch(data.type) {
+            case 'init':
+                resetGame(data.time);
+                if (data.username) { oppKey=data.username; updatePlayerLabels(); }
+                conn.send({type:'handshake', username:myKey});
+                addChatMessage('Game started – good luck!','sys');
+                broadcastMyStatus('playing');
+                break;
+
+            case 'handshake':
+                if (data.username) { oppKey=data.username; updatePlayerLabels(); }
+                break;
+
+            case 'move':
+                if (data.timeRemaining!==undefined) timers[myColor==='w'?'b':'w']=data.timeRemaining;
+                receiveOpponentMove(data.move);
+                break;
+
+            case 'resign':
+                clearInterval(timerInterval);
+                score.me++;  updateScoreUI();
+                sounds.gameEnd.play().catch(()=>{});
+                showGameEndPopup('🏆','You Win!',(oppKey||'Opponent')+' resigned.',true);
+                document.getElementById('status').innerText=(oppKey||'Opponent')+' resigned – You Win!';
+                break;
+
+            case 'chat':
+                sounds.notify.currentTime=0; sounds.notify.play().catch(()=>{});
+                addChatMessage(data.text,'them');
+                break;
+
+            case 'rematch_request':  showRematchOffer(data.time); break;
+            case 'rematch_accept':
+                closePopup();
+                myColor=data.yourColor;
+                board.orientation(myColor==='w'?'white':'black');
+                resetGame(data.time); updatePlayerLabels();
+                addChatMessage('Rematch started!','sys');
+                break;
+            case 'rematch_decline':
+                addChatMessage((oppKey||'Opponent')+' declined rematch.','sys');
+                closePopup(); break;
+
+            case 'call_ring':
+                // Other side is calling us (data channel signal, actual WebRTC call comes via peer.on('call'))
+                document.getElementById('caller-name').textContent = oppKey||'Opponent';
+                document.getElementById('call-popup').classList.add('show');
+                break;
+            case 'call_ended':
+                if (activeCall) activeCall.close();
+                cleanupCall(); addChatMessage('Opponent ended the call.','sys'); break;
+            case 'call_rejected':
+                cleanupCall(); addChatMessage('Call declined.','sys'); break;
+        }
+    });
+    conn.on('close', ()=>addChatMessage((oppKey||'Opponent')+' disconnected.','sys'));
+}
+
+/* ══════════════════════════════════════════════
+   RECEIVE OPPONENT MOVE + FIRE PREMOVES
+══════════════════════════════════════════════ */
+function receiveOpponentMove(san) {
+    const moveObj = game.move(san);
+    if (!moveObj) return;
+
+    board.position(game.fen(), true);
+    updateLastMoveVisuals(moveObj);
+    updateCheckHighlight();
+    playSound(moveObj);
+    checkStartClock();
+
+    // Fire premove queue — only if it's now our turn
+    const allowed = myColor || game.turn();
+    if (game.turn() === allowed && premoveQueue.length > 0) {
+        // Small delay so player can see opponent's move before premoves fire
+        setTimeout(() => {
+            executePremoveQueue();
+            updateStatus();
+            handleGameOver();
+        }, 50);
+    } else {
+        updateStatus();
+        handleGameOver();
+    }
+}
+
+/* ══════════════════════════════════════════════
+   PREMOVE SYSTEM (chess.com correct behavior)
+
+   KEY RULES:
+   1. Premoves are entered from the REAL board position (not simulated future).
+      You tap a piece where it actually IS right now. The queue stores {from,to}
+      based on current piece locations.
+   2. Multiple premoves can be queued in sequence.
+   3. Right-click anywhere on board cancels all premoves.
+   4. When opponent moves: execute queue one by one. If any is illegal → cancel
+      that one AND all remaining. This matches chess.com exactly.
+   5. The "from" square of each queued premove shows dark red. The "to" square
+      shows lighter red. Source square of current selection shows bright outline.
+══════════════════════════════════════════════ */
+
+function cancelAllPremoves() {
+    premoveQueue = [];
+    pmSelectSrc  = null;
+    pmSimGame    = null;
+    clearAllGhosts();
+    $('#board .square-55d63').removeClass('premove-from premove-to premove-select');
+}
+
+// Check if moving from→to is a pawn promotion
+function isPromotion(from, to) {
+    const piece = game.get(from);
+    if (!piece || piece.type !== 'p') return false;
+    const toRank = to[1];
+    return (piece.color === 'w' && toRank === '8') ||
+           (piece.color === 'b' && toRank === '1');
+}
+
+// Show promotion picker; calls callback(promo) with chosen piece letter
+function showPromoPicker(color, callback) {
+    const pieces = ['q','r','b','n'];
+    const names  = {q:'Queen', r:'Rook', b:'Bishop', n:'Knight'};
+    const choices = document.getElementById('promo-choices');
+    choices.innerHTML = '';
+    pieces.forEach(p => {
+        const btn = document.createElement('button');
+        btn.className = 'promo-btn';
+        const imgUrl = `https://chessboardjs.com/img/chesspieces/wikipedia/${color}${p.toUpperCase()}.png`;
+        btn.style.backgroundImage = `url('${imgUrl}')`;
+        btn.title = names[p];
+        btn.onclick = () => {
+            document.getElementById('promo-overlay').classList.remove('show');
+            callback(p);
+        };
+        choices.appendChild(btn);
+    });
+    document.getElementById('promo-overlay').classList.add('show');
+}
+
+// Rebuild sim game — KEY: flip FEN turn to OUR color before each premove
+// because chess.js alternates turns, but all premoves are our color.
+function rebuildSimGame() {
+    const ourColor = myColor || game.turn();
+    pmSimGame = new Chess(game.fen());
+
+    for (const pm of premoveQueue) {
+        // If sim thinks it's opponent's turn, flip FEN active color back to ours
+        if (pmSimGame.turn() !== ourColor) {
+            const parts = pmSimGame.fen().split(' ');
+            parts[1] = ourColor;
+            parts[3] = '-'; // clear en-passant safely
+            pmSimGame = new Chess(parts.join(' ')) || pmSimGame;
+        }
+        const r = pmSimGame.move({from:pm.from, to:pm.to, promotion:pm.promo||'q'});
+        if (!r) break; // stop sim if premove invalid in this position
+    }
+}
+
+// Remove all ghost overlays and restore piece opacities
+function clearAllGhosts() {
+    $('.ghost-piece').remove();
+    $('#board img').css('opacity','');
+}
+
+// (ghost rendering is now handled inline in renderPremoveVisuals)
+function renderOneGhost(fromSq, toSq, pieceType, pieceColor) {}
+
+function renderPremoveVisuals() {
+    $('#board .square-55d63').removeClass('premove-from premove-to premove-select');
+    clearAllGhosts();
+
+    if (premoveQueue.length > 0) {
+        // Collect all "to" squares (ghost destinations)
+        const toSquares = new Set(premoveQueue.map(pm => pm.to));
+        // Collect all "from" squares that are NOT also a "to" (i.e. the real piece origins)
+        const realFroms = premoveQueue
+            .map(pm => pm.from)
+            .filter(sq => !toSquares.has(sq));
+
+        // Dim the real origin pieces on the actual board
+        realFroms.forEach(sq => {
+            $(`#board .square-${sq} img`).css('opacity', '0.2');
+            $(`#board .square-${sq}`).addClass('premove-from');
+        });
+
+        // For each premove, highlight squares and place ghost at destination
+        premoveQueue.forEach(pm => {
+            $(`#board .square-${pm.from}`).addClass('premove-from');
+            $(`#board .square-${pm.to}`).addClass('premove-to');
+            // Place ghost piece image at destination
+            const imgUrl = `https://chessboardjs.com/img/chesspieces/wikipedia/${pm.pieceColor}${pm.pieceType.toUpperCase()}.png`;
+            $('<div>')
+                .addClass('ghost-piece')
+                .css('background-image', `url('${imgUrl}')`)
+                .appendTo(`#board .square-${pm.to}`);
+        });
+    }
+
+    // Draw current selection highlight
+    if (pmSelectSrc) {
+        $(`#board .square-${pmSelectSrc}`).addClass('premove-select');
+        // If pmSelectSrc is a ghost destination (chained), highlight it specially
+        $(`#board .square-${pmSelectSrc} img`).css('opacity', '0.2');
+    }
+
+
+}
+
+function executePremoveQueue() {
+    if (premoveQueue.length === 0) return;
+    if (game.game_over()) { cancelAllPremoves(); return; }
+
+    const allowed = myColor || game.turn();
+
+    // Fire as many premoves as possible while it's our turn
+    while (premoveQueue.length > 0) {
+        if (game.game_over()) { cancelAllPremoves(); break; }
+        if (game.turn() !== allowed) break; // opponent's turn now, stop
+
+        const pm = premoveQueue.shift();
+        const move = game.move({from:pm.from, to:pm.to, promotion:pm.promo||'q'});
+
+        if (!move) {
+            // Illegal premove → cancel all remaining
+            cancelAllPremoves();
+            break;
+        }
+
+        // If this is a looping premove, re-queue it at the END
+        if (pm.loop) {
+            premoveQueue.push({...pm});
+        }
+
+        // Send move to opponent
+        if (conn && conn.open) {
+            conn.send({type:'move', move:move.san, timeRemaining:timers[myColor]});
+        }
+
+        board.position(game.fen(), true);
+        updateLastMoveVisuals(move);
+        updateCheckHighlight();
+        playSound(move);
+        checkStartClock();
+        updateStatus();
+        handleGameOver();
+
+        if (game.game_over()) { cancelAllPremoves(); break; }
+
+        // In online mode: after sending one move, wait for opponent's response
+        // In local mode: keep firing if it's still our turn (both sides same color = null)
+        if (myColor !== null) break;
+    }
+
+    rebuildSimGame();
+    renderPremoveVisuals();
+}
+
+/* ══════════════════════════════════════════════
+   BOARD CLICK HANDLING
+══════════════════════════════════════════════ */
+function onSquareClick(square) {
+    if (game.game_over() || (timeControl>0 && (timers.w<=0||timers.b<=0))) return;
+    const allowed = myColor || game.turn();
+
+    /* ─── NOT OUR TURN: premove entry ─── */
+    if (game.turn() !== allowed) {
+
+        // simGame reflects board AFTER all queued premoves — use it for piece lookup
+        const simGame = pmSimGame || new Chess(game.fen());
+
+        // Tapping the already-selected source → deselect
+        if (pmSelectSrc === square) {
+            pmSelectSrc = null;
+            renderPremoveVisuals();
+            return;
+        }
+
+        // Check if this square has our piece in the SIMULATED board
+        // This handles tapping E5 when pawn was premoved there from E4
+        const simPiece = simGame.get(square);
+        const isOurSimPiece = simPiece && simPiece.color === allowed;
+
+        // If we have a source selected already → this tap is the DESTINATION
+        if (pmSelectSrc) {
+            // Unless tapping another own piece → switch selection
+            if (isOurSimPiece) {
+                pmSelectSrc = square;
+                renderPremoveVisuals();
+                return;
+            }
+
+            // It's a destination — add premove to queue
+            const movingPiece = simGame.get(pmSelectSrc);
+            if (!movingPiece) { pmSelectSrc = null; renderPremoveVisuals(); return; }
+
+            const src = pmSelectSrc;
+            pmSelectSrc = null;
+
+            const isPawnPromo = movingPiece.type === 'p' &&
+                ((movingPiece.color === 'w' && square[1] === '8') ||
+                 (movingPiece.color === 'b' && square[1] === '1'));
+
+            const addToQueue = (promo) => {
+                premoveQueue.push({
+                    from: src, to: square, promo,
+                    pieceType: movingPiece.type, pieceColor: movingPiece.color,
+                    loop: false
+                });
+                rebuildSimGame();  // advance sim so NEXT tap sees updated positions
+                sounds.premove.currentTime = 0; sounds.premove.play().catch(()=>{});
+                renderPremoveVisuals();
+            };
+
+            if (isPawnPromo) {
+                showPromoPicker(movingPiece.color, addToQueue);
+            } else {
+                addToQueue('q');
+            }
+            return;
+        }
+
+        // No source selected yet
+        if (isOurSimPiece) {
+            // Select this piece (works for real pieces AND ghost-premoved pieces)
+            pmSelectSrc = square;
+            renderPremoveVisuals();
+            return;
+        }
+
+        // Tapped empty/opp square with nothing selected → cancel
+        cancelAllPremoves();
+        return;
+    }
+
+    /* ─── OUR TURN: normal move ─── */
+    // Cancel premove selection state
+    pmSelectSrc = null;
+    // In online mode, premoves are fired by receiveOpponentMove → executePremoveQueue
+    // In local mode (no myColor), cancel any pending queue since it's a fresh turn
+    if (premoveQueue.length > 0 && myColor === null) {
+        cancelAllPremoves();
+    }
+
+    // FIRST TAP: select piece
+    if (!sourceSquare) {
+        const piece = game.get(square);
+        if (piece && piece.color === allowed) {
+            sourceSquare = square;
+            highlightSquare(square, 'highlight-square');
+            showLegalMoves(square);
+        } else {
+            triggerInvalidFeedback();
+        }
+        return;
+    }
+
+    // SECOND TAP: attempt move
+    // First check if this would be a promotion — show picker before committing
+    if (isPromotion(sourceSquare, square)) {
+        const piece = game.get(sourceSquare);
+        const savedSrc = sourceSquare;
+        clearVisuals(); sourceSquare = null;
+        showPromoPicker(piece.color, (promo) => {
+            const move = game.move({from:savedSrc, to:square, promotion:promo});
+            if (!move) return;
+            board.position(game.fen(), true);
+            updateLastMoveVisuals(move);
+            updateCheckHighlight();
+            playSound(move);
+            checkStartClock();
+            if (conn&&conn.open) conn.send({type:'move', move:move.san, timeRemaining:timers[myColor]});
+            if (!myColor && !game.game_over()) flipPiecesOnly();
+            updateStatus(); handleGameOver();
+        });
+        return;
+    }
+
+    const move = game.move({from:sourceSquare, to:square, promotion:'q'});
+    if (!move) {
+        const piece = game.get(square);
+        if (piece && piece.color === allowed) {
+            sourceSquare = square;
+            clearVisuals();
+            highlightSquare(square, 'highlight-square');
+            showLegalMoves(square);
+        } else {
+            triggerInvalidFeedback();
+            clearVisuals();
+            sourceSquare = null;
+        }
+        return;
+    }
+
+    // Move succeeded
+    clearVisuals();
+    sourceSquare = null;
+    board.position(game.fen(), true);
+    updateLastMoveVisuals(move);
+    updateCheckHighlight();
+    playSound(move);
+    checkStartClock();
+    if (conn&&conn.open) conn.send({type:'move', move:move.san, timeRemaining:timers[myColor]});
+    broadcastGameUpdate(game.fen());
+    // In local mode, flip pieces so the next player faces their side
+    if (!myColor && !game.game_over()) flipPiecesOnly();
+    updateStatus();
+    handleGameOver();
+}
+
+/* Flip only piece images, not board squares (local pass-and-play) */
+function flipPiecesOnly() {
+    document.getElementById('board').classList.toggle('pieces-flipped');
+}
+
+/* Flip entire board orientation */
+function flipBoard() {
+    board.flip();
+    // Also swap the player row labels so names stay correct
+    const meName  = document.getElementById('me-name').textContent;
+    const oppName = document.getElementById('opp-name').textContent;
+    const meDot   = document.getElementById('me-dot').className;
+    const oppDot  = document.getElementById('opp-dot').className;
+    document.getElementById('me-name').textContent  = oppName;
+    document.getElementById('opp-name').textContent = meName;
+    document.getElementById('me-dot').className  = oppDot;
+    document.getElementById('opp-dot').className = meDot;
+}
+
+// Right-click on board = cancel premoves (chess.com behavior)
+$('#board').on('contextmenu', e => {
+    e.preventDefault();
+    cancelAllPremoves();
+});
+
+// Long-press on board (500ms) = toggle loop on the LAST queued premove
+// This lets you hold to say "repeat this premove every turn"
+let longPressTimer = null;
+$('#board').on('touchstart mousedown', '.square-55d63', function(e) {
+    longPressTimer = setTimeout(() => {
+        if (premoveQueue.length === 0) return;
+        // Toggle loop on last queued premove
+        const last = premoveQueue[premoveQueue.length - 1];
+        last.loop = !last.loop;
+        if (navigator.vibrate) navigator.vibrate(last.loop ? [30,20,30] : [40]);
+        renderPremoveVisuals();
+    }, 500);
+});
+$('#board').on('touchend touchcancel mouseup mouseleave', () => {
+    clearTimeout(longPressTimer);
+});
+
+/* ══════════════════════════════════════════════
+   GAME / TIMER
+══════════════════════════════════════════════ */
+function resetGame(tcTime) {
+    game = new Chess();
+    board.position('start', true);
+    document.getElementById('board').classList.remove('pieces-flipped');
+    timeControl = tcTime;
+    timers = {w:tcTime, b:tcTime};
+    clearInterval(timerInterval); timerInterval=null;
+    clearVisuals();
+    cancelAllPremoves();
+    sourceSquare=null;
+    updateMaterial();
+    $('.square-55d63').removeClass('last-move king-in-check');
+    updateTimersUI(); updateStatus();
+}
+
+function formatTime(s) {
+    if(s<=0) return '0:00';
+    return Math.floor(s/60)+':'+(s%60<10?'0':'')+(s%60);
+}
+function updateTimersUI() {
+    if(timeControl===0){$('#player-timer,#opponent-timer').text('∞');return;}
+    $('#player-timer').text(formatTime(timers[myColor||'w']));
+    $('#opponent-timer').text(formatTime(timers[myColor==='w'?'b':'w']));
+}
+function checkStartClock() {
+    if(!timerInterval&&timeControl>0&&game.history().length>0){
+        timerInterval=setInterval(()=>{
+            if(game.game_over())return clearInterval(timerInterval);
+            timers[game.turn()]--;
+            updateTimersUI();
+            if(timers[game.turn()]<=0){clearInterval(timerInterval);sounds.gameEnd.play().catch(()=>{});handleGameOver();}
+        },1000);
+    }
+}
+
+function handleGameOver() {
+    const timeLoss = timeControl>0&&(timers.w<=0||timers.b<=0);
+    if(!game.game_over()&&!timeLoss) return;
+    cancelAllPremoves();
+    const opp = oppKey||'Opponent';
+    let icon,title,sub;
+    if(game.in_checkmate()){
+        const loser=game.turn();
+        if(myColor){ if(loser!==myColor){icon='🏆';title='You Win!';sub='Checkmate!';score.me++;}
+                     else{icon='😔';title='You Lost';sub='Checkmate.';score.opp++;} }
+        else{icon='♟️';title='Checkmate!';sub=(loser==='w'?'Black':'White')+' wins.';}
+    } else if(game.in_draw()){
+        icon='🤝';title='Draw';sub='Game drawn.';if(myColor)score.draw++;
+    } else if(timeLoss){
+        const timedOut=timers.w<=0?'w':'b';
+        if(myColor){ if(timedOut===myColor){icon='⏰';title='Time Out';sub='You ran out of time.';score.opp++;}
+                     else{icon='🏆';title='You Win!';sub=opp+' timed out!';score.me++;} }
+        else{icon='⏰';title='Time';sub=(timedOut==='w'?'White':'Black')+' timed out.';}
+    }
+    if(icon){updateScoreUI();showGameEndPopup(icon,title,sub,true);broadcastMyStatus('online');}
+}
+
+function exportPGN(){
+    const pgn=game.pgn();
+    if(!pgn)return alert('No moves yet!');
+    navigator.clipboard.writeText(pgn).then(()=>alert('PGN copied!'));
+}
+function resignGame(){
+    if(game.game_over())return;
+    if(conn&&conn.open)conn.send({type:'resign'});
+    clearInterval(timerInterval);
+    cancelAllPremoves();
+    score.opp++; updateScoreUI();
+    sounds.gameEnd.play().catch(()=>{});
+    document.getElementById('status').innerText='You Resigned.';
+    showGameEndPopup('😔','You Resigned',conn&&conn.open?'Want to try again?':'',true);
+}
+
+/* ══════════════════════════════════════════════
+   VISUALS
+══════════════════════════════════════════════ */
+function updateCheckHighlight(){
+    $('#board .square-55d63').removeClass('king-in-check');
+    if(!game.in_check())return;
+    const turn=game.turn(), b=game.board();
+    for(let r=0;r<8;r++) for(let c=0;c<8;c++){
+        const p=b[r][c];
+        if(p&&p.type==='k'&&p.color===turn){
+            $('#board .square-'+(String.fromCharCode(97+c))+(8-r)).addClass('king-in-check');
+            return;
+        }
+    }
+}
+function updateLastMoveVisuals(mv){
+    $('.square-55d63').removeClass('last-move');
+    if(mv){$('.square-'+mv.from).addClass('last-move');$('.square-'+mv.to).addClass('last-move');}
+    updateMaterial();
+}
+function showLegalMoves(sq){
+    game.moves({square:sq,verbose:true}).forEach(m=>{
+        const cap=m.flags.includes('c')||m.flags.includes('e');
+        $('#board .square-'+m.to).addClass(cap?'legal-move-capture':'legal-move');
+    });
+}
+function highlightSquare(sq,cls){
+    if(cls==='highlight-square')$('#board .square-55d63').removeClass('highlight-square');
+    $('#board .square-'+sq).addClass(cls);
+}
+function clearLegalMoves(){$('#board .square-55d63').removeClass('legal-move legal-move-capture');}
+function clearVisuals(){$('#board .square-55d63').removeClass('highlight-square');clearLegalMoves();}
+
+function updateStatus(){
+    const el=document.getElementById('status');
+    if(timeControl>0){if(timers.w<=0)return el.innerText='Black Wins on Time!';if(timers.b<=0)return el.innerText='White Wins on Time!';}
+    if(game.in_checkmate())return el.innerText='Checkmate!';
+    if(game.in_draw())return el.innerText='Draw!';
+    if(!conn){el.innerText='Local Mode: '+(game.turn()==='w'?'White':'Black')+' to move';return;}
+    if(game.turn()===myColor){
+        el.innerText='Your Turn';
+    } else {
+        el.innerText = (oppKey||'Opponent')+"'s Turn";
+    }
+}
+
+/* ══════════════════════════════════════════════
+   POPUP / GAME MANAGEMENT
+══════════════════════════════════════════════ */
+function showGameEndPopup(icon,title,sub,withRematch){
+    document.getElementById('popup-icon').textContent=icon;
+    document.getElementById('popup-title').textContent=title;
+    document.getElementById('popup-sub').textContent=sub;
+    let btns='';
+    if(withRematch&&conn&&conn.open)btns+=`<button class="btn-rematch" onclick="requestRematch()">🔄 Rematch</button>`;
+    btns+=`<button class="btn-newgame" onclick="startNewGame()">♟ New Game</button>`;
+    btns+=`<button class="btn-close" onclick="closePopup()">✕ Close</button>`;
+    document.getElementById('popup-buttons').innerHTML=btns;
+    document.getElementById('game-end-overlay').classList.add('show');
+}
+function closePopup(){document.getElementById('game-end-overlay').classList.remove('show');}
+function startNewGame(){
+    closePopup(); myColor=null; conn=null; oppKey=null;
+    resetGame(0); score={me:0,draw:0,opp:0}; updatePlayerLabels();
+    document.getElementById('call-btn').style.display='none';
+    document.getElementById('voice-bar').classList.remove('show');
+    exitGameMode();
+}
+function requestRematch(){
+    if(!conn||!conn.open)return;
+    conn.send({type:'rematch_request',time:timeControl});
+    addChatMessage('Rematch requested…','sys');
+    document.getElementById('popup-buttons').innerHTML=
+        `<button class="btn-rematch" disabled style="opacity:0.5">⏳ Waiting…</button>
+         <button class="btn-close" onclick="closePopup()">✕ Close</button>`;
+}
+function showRematchOffer(tcTime){
+    document.getElementById('popup-icon').textContent='🔄';
+    document.getElementById('popup-title').textContent='Rematch?';
+    document.getElementById('popup-sub').textContent=(oppKey||'Opponent')+' wants a rematch!';
+    document.getElementById('popup-buttons').innerHTML=
+        `<button class="btn-rematch" onclick="acceptRematch(${tcTime})">✅ Accept</button>
+         <button class="btn-close" onclick="declineRematch()">✕ Decline</button>`;
+    document.getElementById('game-end-overlay').classList.add('show');
+}
+function acceptRematch(tcTime){
+    closePopup();
+    myColor=myColor==='w'?'b':'w';
+    board.orientation(myColor==='w'?'white':'black');
+    resetGame(tcTime);
+    conn.send({type:'rematch_accept',time:tcTime,yourColor:myColor==='w'?'b':'w'});
+    updatePlayerLabels();addChatMessage('Rematch started!','sys');
+}
+function declineRematch(){
+    closePopup();
+    if(conn&&conn.open)conn.send({type:'rematch_decline'});
+    addChatMessage('Rematch declined.','sys');
+}
+function showScoreBar(show){document.getElementById('score-bar').style.display=show?'block':'none';}
+function updateScoreUI(){
+    document.getElementById('score-me').textContent=score.me;
+    document.getElementById('score-draw').textContent=score.draw;
+    document.getElementById('score-opp').textContent=score.opp;
+}
+
+/* ══════════════════════════════════════════════
+   MATERIAL COUNT  (chess.com style)
+══════════════════════════════════════════════ */
+const PIECE_VALUES = { p:1, n:3, b:3, r:5, q:9 };
+
+function updateMaterial() {
+    const count = { w:{p:0,n:0,b:0,r:0,q:0}, b:{p:0,n:0,b:0,r:0,q:0} };
+    const boardState = game.board();
+    for (let r=0;r<8;r++) for (let c=0;c<8;c++) {
+        const p = boardState[r][c];
+        if (p && p.type !== 'k') count[p.color][p.type]++;
+    }
+    const START = {p:8,n:2,b:2,r:2,q:1};
+    // whiteCaptured = black pieces that are gone (white took them)
+    const whiteCaptured={}, blackCaptured={};
+    let whiteVal=0, blackVal=0;
+    for (const t of ['p','n','b','r','q']) {
+        whiteCaptured[t] = Math.max(0, START[t] - count.b[t]);
+        blackCaptured[t] = Math.max(0, START[t] - count.w[t]);
+        whiteVal += whiteCaptured[t] * PIECE_VALUES[t];
+        blackVal += blackCaptured[t] * PIECE_VALUES[t];
+    }
+    const meColor  = myColor || 'w';
+    const oppColor = meColor === 'w' ? 'b' : 'w';
+    const meCap    = meColor  === 'w' ? whiteCaptured : blackCaptured;
+    const oppCap   = oppColor === 'w' ? whiteCaptured : blackCaptured;
+    const meScore  = meColor  === 'w' ? whiteVal : blackVal;
+    const oppScore = oppColor === 'w' ? whiteVal : blackVal;
+    renderMaterialRow('me-material',  meCap,  meColor,  meScore  - oppScore);
+    renderMaterialRow('opp-material', oppCap, oppColor, oppScore - meScore);
+}
+
+function renderMaterialRow(elId, captured, capturedByColor, scoreDiff) {
+    const el = document.getElementById(elId);
+    if (!el) return;
+    el.innerHTML = '';
+    // Pieces shown are the OPPONENT's color (the ones that were taken)
+    const imgColor = capturedByColor === 'w' ? 'b' : 'w';
+    const ORDER = ['p','n','b','r','q'];
+    let hasAny = false;
+    for (const type of ORDER) {
+        for (let i=0; i<(captured[type]||0); i++) {
+            const div = document.createElement('div');
+            div.className = 'mat-piece';
+            div.style.backgroundImage =
+                `url('https://chessboardjs.com/img/chesspieces/wikipedia/${imgColor}${type.toUpperCase()}.png')`;
+            el.appendChild(div);
+            hasAny = true;
+        }
+    }
+    if (scoreDiff > 0) {
+        const sc = document.createElement('span');
+        sc.className = 'mat-score positive';
+        sc.textContent = '+' + scoreDiff;
+        el.appendChild(sc);
+    }
+}
+
+/* ══════════════════════════════════════════════
+   CHAT
+══════════════════════════════════════════════ */
+function toggleControls(){ /* removed — controls integrated into bottom UI */ }
+function toggleChat(){
+    chatOpen=!chatOpen;
+    document.getElementById('chat-body').style.display=chatOpen?'block':'none';
+    document.getElementById('chat-arrow').textContent=chatOpen?'▲':'▼';
+    if(chatOpen){document.getElementById('chat-badge').style.display='none';const m=document.getElementById('chat-messages');m.scrollTop=m.scrollHeight;}
+}
+function addChatMessage(text,who){
+    const msgs=document.getElementById('chat-messages');
+    const div=document.createElement('div');div.className='chat-msg';
+    if(who==='sys'){div.innerHTML=`<span class="sys">${text}</span>`;}
+    else{const lbl=who==='you'?(myKey||'You'):(oppKey||'Opponent');div.innerHTML=`<span class="${who}"><b>${lbl}:</b> ${text}</span>`;}
+    msgs.appendChild(div);msgs.scrollTop=msgs.scrollHeight;
+    if(who==='them'&&!chatOpen)document.getElementById('chat-badge').style.display='inline';
+}
+function sendChat(){
+    const inp=document.getElementById('chat-input');const txt=inp.value.trim();
+    if(!txt||!conn||!conn.open)return;
+    conn.send({type:'chat',text:txt});addChatMessage(txt,'you');inp.value='';
+}
+
+/* ══════════════════════════════════════════════
+   INIT
+══════════════════════════════════════════════ */
+board = ChessBoard('board', {
+    position: 'start', draggable: false,
+    pieceTheme: 'https://chessboardjs.com/img/chesspieces/wikipedia/{piece}.png'
+});
+$(window).on('resize', board.resize);
+$('#board').on('click', '.square-55d63', function(){
+    const sq=$(this).attr('data-square'); if(sq) onSquareClick(sq);
+});
+
+updateTimersUI(); updateStatus(); updatePlayerLabels();
+
+// Show initial UI state
+document.getElementById('setup-login').style.display = 'block';
+document.getElementById('setup-lobby').style.display = 'none';
+document.getElementById('ingame-panel').style.display = 'none';
+document.getElementById('game-actions').style.display = 'none';
+document.getElementById('chat-section').style.display = 'none';
+
+loadSavedLogin();
+renderFriendList();
+setTimeout(checkInviteLink, 400);
+</script>
+</body>
+</html>
