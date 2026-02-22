@@ -47,6 +47,10 @@
         .action-btn:active { opacity: 0.7; }
         .action-btn.danger { background: #1e0a0a; color: #ef9a9a; border-color: #4a1010; }
         .action-btn.secondary { background: #0a1020; color: #90caf9; border-color: #1a3050; }
+        /* Call button always takes up space — visibility swap prevents layout snap */
+        #call-btn { visibility: hidden; pointer-events: none; transition: background 0.2s, color 0.2s; }
+        #call-btn.visible { visibility: visible; pointer-events: auto; }
+        #call-btn.in-call { background: #1b3a1b !important; color: #66bb6a !important; border-color: #2d6a2d !important; }
 
         /* ── BOTTOM UI ── */
         #bottom-ui { max-width: 480px; margin: 0 auto; width: 100%; padding: 0 6px 80px; }
@@ -257,7 +261,7 @@
 
     <div class="actions" id="game-actions" style="display:none;">
         <button onclick="flipBoard()" class="action-btn">🔄 Flip</button>
-        <button class="action-btn secondary" id="call-btn" onclick="startCall()" style="display:none;">📞 Call</button>
+        <button class="action-btn secondary" id="call-btn" onclick="handleCallBtn()">📞 Call</button>
         <button class="action-btn" onclick="exportPGN()">📋 PGN</button>
         <button class="action-btn danger" onclick="resignGame()">🏳 Resign</button>
     </div>
@@ -472,18 +476,6 @@ let chatOpen = false;
 let friendList = [];
 let isSpectating = false;
 
-// Voice call state
-let localStream = null, peerConnection = null, isMuted = false, inCall = false;
-
-// Free STUN servers (Google) — works for most connections globally
-const ICE_SERVERS = {
-    iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' },
-        { urls: 'stun:stun2.l.google.com:19302' }
-    ]
-};
-
 // Pending invite
 let pendingInvite = null; // {from, time}
 
@@ -605,7 +597,7 @@ function initSocket() {
 
     socket.on('voice_call_accepted', async () => {
         addChatMessage('Call accepted! Connecting…', 'sys');
-        await startWebRTC(true); // we are the caller, so we create the offer
+        await setupPeerConnection(); // caller sets up and sends offer
     });
 
     socket.on('voice_call_rejected', () => {
@@ -620,7 +612,15 @@ function initSocket() {
 
     // WebRTC signaling relay
     socket.on('webrtc_offer', async ({ offer }) => {
-        if (!peerConnection) await startWebRTC(false);
+        // Callee already set up peerConnection in answerCall()
+        if (!peerConnection) {
+            // Fallback: set up now if not ready
+            isCaller = false;
+            if (!localStream) {
+                try { localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false }); } catch(e) { return; }
+            }
+            await setupPeerConnection();
+        }
         await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
         const answer = await peerConnection.createAnswer();
         await peerConnection.setLocalDescription(answer);
@@ -1038,19 +1038,54 @@ function toggleDrawer() {
 }
 
 /* ══════════════════════════════════════════════
-   VOICE CALL (WebRTC via Socket.io signaling)
+   VOICE CALL  — fixed no-snap + working WebRTC
 ══════════════════════════════════════════════ */
+let localStream = null, peerConnection = null, isMuted = false, inCall = false, isCaller = false;
+
+// Free STUN + Open Relay TURN (globally free, no account needed)
+const ICE_SERVERS = {
+    iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: 'turn:openrelay.metered.ca:80',              username: 'openrelayproject', credential: 'openrelayproject' },
+        { urls: 'turn:openrelay.metered.ca:443',             username: 'openrelayproject', credential: 'openrelayproject' },
+        { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' }
+    ]
+};
+
+// Use visibility so button always takes up space — prevents layout snap
+function showCallBtn(show) {
+    const btn = document.getElementById('call-btn');
+    btn.classList.toggle('visible', show);
+}
+
+function handleCallBtn() {
+    if (inCall) hangupCall();
+    else startCall();
+}
+
+function updateCallBtn() {
+    const btn = document.getElementById('call-btn');
+    if (inCall) {
+        btn.textContent = '📵 End Call';
+        btn.classList.add('in-call');
+    } else {
+        btn.textContent = '📞 Call';
+        btn.classList.remove('in-call');
+    }
+}
+
 async function startCall() {
     if (!socket || !socket.connected || !currentRoomId) return alert('Connect to a friend first.');
     if (inCall) return;
     try {
         localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
     } catch (e) {
-        return alert('Microphone access denied. Please allow mic access and try again.');
+        return alert('❌ Microphone access denied.\nPlease allow mic in your browser settings.');
     }
+    isCaller = true;
     socket.emit('voice_call_request', { roomId: currentRoomId });
-    addChatMessage('Calling ' + (oppKey || 'opponent') + '…', 'sys');
-    document.getElementById('call-btn').style.display = 'none';
+    addChatMessage('📞 Calling ' + (oppKey || 'opponent') + '…', 'sys');
 }
 
 async function answerCall() {
@@ -1058,74 +1093,73 @@ async function answerCall() {
     try {
         localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
     } catch (e) {
-        return alert('Microphone access denied.');
+        return alert('❌ Microphone access denied.');
     }
+    isCaller = false;
+    // Set up peer connection NOW so it's ready when offer arrives
+    await setupPeerConnection();
     socket.emit('voice_call_accept', { roomId: currentRoomId });
-    // WebRTC will be set up after caller receives voice_call_accepted
 }
 
 function rejectCall() {
     document.getElementById('call-popup').classList.remove('show');
-    socket.emit('voice_call_reject', { roomId: currentRoomId });
+    if (socket && currentRoomId) socket.emit('voice_call_reject', { roomId: currentRoomId });
 }
 
-async function startWebRTC(isCallerSide) {
+async function setupPeerConnection() {
     peerConnection = new RTCPeerConnection(ICE_SERVERS);
-    inCall = true;
 
-    // Add local audio tracks
     if (localStream) {
-        localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
+        localStream.getTracks().forEach(t => peerConnection.addTrack(t, localStream));
     }
 
-    // When remote audio arrives, play it
     peerConnection.ontrack = (event) => {
         const audio = document.getElementById('remote-audio');
-        audio.srcObject = event.streams[0];
-        document.getElementById('voice-status-text').textContent = 'In call with ' + (oppKey || 'opponent');
+        if (audio.srcObject !== event.streams[0]) audio.srcObject = event.streams[0];
+        inCall = true;
         document.getElementById('voice-bar').classList.add('show');
-        document.getElementById('call-btn').style.display = 'none';
+        document.getElementById('voice-status-text').textContent = '🎙 In call with ' + (oppKey || 'opponent');
+        updateCallBtn();
         addChatMessage('🎙 Call connected!', 'sys');
     };
 
-    // Send ICE candidates to the other side via server
     peerConnection.onicecandidate = (event) => {
-        if (event.candidate) {
+        if (event.candidate && socket && currentRoomId) {
             socket.emit('webrtc_ice', { roomId: currentRoomId, candidate: event.candidate });
         }
     };
 
     peerConnection.onconnectionstatechange = () => {
-        if (peerConnection.connectionState === 'disconnected' || peerConnection.connectionState === 'failed') {
-            cleanupCall();
-            addChatMessage('Call disconnected.', 'sys');
+        const s = peerConnection ? peerConnection.connectionState : '';
+        if (s === 'disconnected' || s === 'failed' || s === 'closed') {
+            if (inCall) { cleanupCall(); addChatMessage('📵 Call disconnected.', 'sys'); }
         }
     };
 
-    // If caller, create and send the offer
-    if (isCallerSide) {
-        const offer = await peerConnection.createOffer();
+    // Caller creates and sends the offer
+    if (isCaller) {
+        const offer = await peerConnection.createOffer({ offerToReceiveAudio: true });
         await peerConnection.setLocalDescription(offer);
         socket.emit('webrtc_offer', { roomId: currentRoomId, offer });
     }
 }
 
 function hangupCall() {
-    socket.emit('voice_call_end', { roomId: currentRoomId });
+    if (socket && socket.connected && currentRoomId) socket.emit('voice_call_end', { roomId: currentRoomId });
     cleanupCall();
-    addChatMessage('You ended the call.', 'sys');
+    addChatMessage('📵 You ended the call.', 'sys');
 }
 
 function cleanupCall() {
-    inCall = false;
-    isMuted = false;
-    if (peerConnection) { peerConnection.close(); peerConnection = null; }
+    inCall = false; isCaller = false; isMuted = false;
+    if (peerConnection) { try { peerConnection.close(); } catch(e){} peerConnection = null; }
     if (localStream) { localStream.getTracks().forEach(t => t.stop()); localStream = null; }
-    document.getElementById('remote-audio').srcObject = null;
+    const audio = document.getElementById('remote-audio');
+    if (audio) audio.srcObject = null;
     document.getElementById('voice-bar').classList.remove('show');
     document.getElementById('mute-btn').textContent = '🎙 Mute';
     document.getElementById('mute-btn').classList.remove('muted');
-    if (currentRoomId) document.getElementById('call-btn').style.display = 'inline-block';
+    updateCallBtn();
 }
 
 function toggleMute() {
@@ -1146,7 +1180,8 @@ function enterGameMode() {
     document.getElementById('game-actions').style.display = 'flex';
     if (currentRoomId) {
         document.getElementById('chat-section').style.display = 'block';
-        document.getElementById('call-btn').style.display = 'inline-block';
+        showCallBtn(true);
+        updateCallBtn();
         showScoreBar(true);
     }
 }
@@ -1411,7 +1446,7 @@ function startNewGame() {
     closePopup(); myColor = null; currentRoomId = null; oppKey = null;
     resetGame(0); score = { me: 0, draw: 0, opp: 0 }; updatePlayerLabels();
     cleanupCall();
-    document.getElementById('call-btn').style.display = 'none';
+    showCallBtn(false);
     exitGameMode();
 }
 function requestRematch() {
