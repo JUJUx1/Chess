@@ -558,10 +558,8 @@ function initSocket() {
     });
 
     // Rematch
-    socket.on('rematch_request', ({ time }) => {
-        showRematchOffer(time);
-    });
-    socket.on('rematch_accept', ({ time, yourColor }) => {
+    socket.on('rematch_request', ({ time }) => { showRematchOffer(time); });
+    socket.on('rematch_accept',  ({ time, yourColor }) => {
         closePopup();
         myColor = yourColor;
         board.orientation(myColor === 'w' ? 'white' : 'black');
@@ -573,31 +571,16 @@ function initSocket() {
         closePopup();
     });
 
-    // Rematch
-    socket.on('rematch_request', ({ time }) => {
-        showRematchOffer(time);
-    });
-    socket.on('rematch_accept', ({ time, yourColor }) => {
-        closePopup();
-        myColor = yourColor;
-        board.orientation(myColor === 'w' ? 'white' : 'black');
-        resetGame(time); updatePlayerLabels();
-        addChatMessage('Rematch started!', 'sys');
-    });
-    socket.on('rematch_decline', () => {
-        addChatMessage((oppKey || 'Opponent') + ' declined rematch.', 'sys');
-        closePopup();
-    });
-
-    // ── Voice Call Events ──
+    // ── Voice Call Signaling ──
     socket.on('voice_call_incoming', ({ from }) => {
         document.getElementById('caller-name').textContent = from;
         document.getElementById('call-popup').classList.add('show');
     });
 
-    socket.on('voice_call_accepted', async () => {
-        addChatMessage('Call accepted! Connecting…', 'sys');
-        await setupPeerConnection(); // caller sets up and sends offer
+    socket.on('voice_call_accepted', () => {
+        // Other side accepted — we (caller) now create & send the WebRTC offer
+        addChatMessage('📞 Connecting call…', 'sys');
+        callerCreateOffer();
     });
 
     socket.on('voice_call_rejected', () => {
@@ -610,30 +593,32 @@ function initSocket() {
         cleanupCall();
     });
 
-    // WebRTC signaling relay
     socket.on('webrtc_offer', async ({ offer }) => {
-        // Callee already set up peerConnection in answerCall()
-        if (!peerConnection) {
-            // Fallback: set up now if not ready
-            isCaller = false;
-            if (!localStream) {
-                try { localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false }); } catch(e) { return; }
-            }
-            await setupPeerConnection();
-        }
-        await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
-        const answer = await peerConnection.createAnswer();
-        await peerConnection.setLocalDescription(answer);
-        socket.emit('webrtc_answer', { roomId: currentRoomId, answer });
+        // We are the CALLEE receiving the offer
+        try {
+            await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+            await flushIceBuffer(); // apply any ICE candidates that arrived early
+            const answer = await peerConnection.createAnswer();
+            await peerConnection.setLocalDescription(answer);
+            socket.emit('webrtc_answer', { roomId: currentRoomId, answer });
+        } catch(e) { console.error('webrtc_offer error', e); }
     });
 
     socket.on('webrtc_answer', async ({ answer }) => {
-        if (peerConnection) await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+        // We are the CALLER receiving the answer
+        try {
+            await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+            await flushIceBuffer(); // apply any ICE candidates that arrived early
+        } catch(e) { console.error('webrtc_answer error', e); }
     });
 
     socket.on('webrtc_ice', async ({ candidate }) => {
-        if (peerConnection && candidate) {
-            try { await peerConnection.addIceCandidate(new RTCIceCandidate(candidate)); } catch (e) {}
+        if (!candidate) return;
+        if (peerConnection && peerConnection.remoteDescription) {
+            try { await peerConnection.addIceCandidate(new RTCIceCandidate(candidate)); } catch(e) {}
+        } else {
+            // Buffer it — remoteDescription not set yet
+            iceCandidateBuffer.push(candidate);
         }
     });
 
@@ -1038,56 +1023,59 @@ function toggleDrawer() {
 }
 
 /* ══════════════════════════════════════════════
-   VOICE CALL  — fixed no-snap + working WebRTC
+   VOICE CALL  (WebRTC — clean rewrite)
+   Flow:
+     Caller  → startCall() → gets mic → emits voice_call_request
+     Callee  ← voice_call_incoming → shows popup
+     Callee  → answerCall() → gets mic → creates RTCPeer → emits voice_call_accept
+     Caller  ← voice_call_accepted → callerCreateOffer() → sends webrtc_offer
+     Callee  ← webrtc_offer → setRemote → createAnswer → sends webrtc_answer
+     Caller  ← webrtc_answer → setRemote → ICE flows → audio connects!
 ══════════════════════════════════════════════ */
 let localStream = null, peerConnection = null, isMuted = false, inCall = false, isCaller = false;
+// Buffer ICE candidates that arrive before remoteDescription is set
+let iceCandidateBuffer = [];
 
-// Free STUN + Open Relay TURN (globally free, no account needed)
 const ICE_SERVERS = {
     iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:stun1.l.google.com:19302' },
-        { urls: 'turn:openrelay.metered.ca:80',              username: 'openrelayproject', credential: 'openrelayproject' },
-        { urls: 'turn:openrelay.metered.ca:443',             username: 'openrelayproject', credential: 'openrelayproject' },
-        { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' }
+        // Free Open Relay TURN — works even behind strict firewalls
+        { urls: 'turn:openrelay.metered.ca:80',                   username: 'openrelayproject', credential: 'openrelayproject' },
+        { urls: 'turn:openrelay.metered.ca:443',                  username: 'openrelayproject', credential: 'openrelayproject' },
+        { urls: 'turn:openrelay.metered.ca:443?transport=tcp',    username: 'openrelayproject', credential: 'openrelayproject' }
     ]
 };
 
-// Use visibility so button always takes up space — prevents layout snap
 function showCallBtn(show) {
-    const btn = document.getElementById('call-btn');
-    btn.classList.toggle('visible', show);
+    document.getElementById('call-btn').classList.toggle('visible', show);
 }
-
 function handleCallBtn() {
-    if (inCall) hangupCall();
-    else startCall();
+    if (inCall) hangupCall(); else startCall();
 }
-
 function updateCallBtn() {
     const btn = document.getElementById('call-btn');
-    if (inCall) {
-        btn.textContent = '📵 End Call';
-        btn.classList.add('in-call');
-    } else {
-        btn.textContent = '📞 Call';
-        btn.classList.remove('in-call');
-    }
+    btn.textContent = inCall ? '📵 End Call' : '📞 Call';
+    btn.classList.toggle('in-call', inCall);
 }
 
+// ── STEP 1: Caller taps Call ──
 async function startCall() {
     if (!socket || !socket.connected || !currentRoomId) return alert('Connect to a friend first.');
     if (inCall) return;
     try {
         localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
     } catch (e) {
-        return alert('❌ Microphone access denied.\nPlease allow mic in your browser settings.');
+        return alert('❌ Microphone access denied.\nPlease allow mic in your browser settings and try again.');
     }
     isCaller = true;
+    iceCandidateBuffer = [];
+    createPeerConnection(); // create early so ICE buffer works
     socket.emit('voice_call_request', { roomId: currentRoomId });
     addChatMessage('📞 Calling ' + (oppKey || 'opponent') + '…', 'sys');
 }
 
+// ── STEP 2: Callee taps Answer ──
 async function answerCall() {
     document.getElementById('call-popup').classList.remove('show');
     try {
@@ -1096,26 +1084,43 @@ async function answerCall() {
         return alert('❌ Microphone access denied.');
     }
     isCaller = false;
-    // Set up peer connection NOW so it's ready when offer arrives
-    await setupPeerConnection();
+    iceCandidateBuffer = [];
+    createPeerConnection(); // ready before offer arrives
     socket.emit('voice_call_accept', { roomId: currentRoomId });
+}
+
+// ── STEP 3: Caller hears accepted → creates offer ──
+async function callerCreateOffer() {
+    if (!peerConnection) return;
+    try {
+        const offer = await peerConnection.createOffer({ offerToReceiveAudio: true });
+        await peerConnection.setLocalDescription(offer);
+        socket.emit('webrtc_offer', { roomId: currentRoomId, offer });
+    } catch(e) { console.error('createOffer error', e); cleanupCall(); }
 }
 
 function rejectCall() {
     document.getElementById('call-popup').classList.remove('show');
     if (socket && currentRoomId) socket.emit('voice_call_reject', { roomId: currentRoomId });
+    if (localStream) { localStream.getTracks().forEach(t => t.stop()); localStream = null; }
 }
 
-async function setupPeerConnection() {
+// ── Create RTCPeerConnection with all handlers ──
+function createPeerConnection() {
+    if (peerConnection) { try { peerConnection.close(); } catch(e){} }
     peerConnection = new RTCPeerConnection(ICE_SERVERS);
 
+    // Add our mic tracks
     if (localStream) {
         localStream.getTracks().forEach(t => peerConnection.addTrack(t, localStream));
     }
 
+    // Remote audio arrives → play it
     peerConnection.ontrack = (event) => {
+        console.log('ontrack fired', event.streams);
         const audio = document.getElementById('remote-audio');
-        if (audio.srcObject !== event.streams[0]) audio.srcObject = event.streams[0];
+        audio.srcObject = event.streams[0];
+        audio.play().catch(e => console.warn('autoplay blocked:', e));
         inCall = true;
         document.getElementById('voice-bar').classList.add('show');
         document.getElementById('voice-status-text').textContent = '🎙 In call with ' + (oppKey || 'opponent');
@@ -1123,6 +1128,7 @@ async function setupPeerConnection() {
         addChatMessage('🎙 Call connected!', 'sys');
     };
 
+    // ICE candidate ready → send to other side
     peerConnection.onicecandidate = (event) => {
         if (event.candidate && socket && currentRoomId) {
             socket.emit('webrtc_ice', { roomId: currentRoomId, candidate: event.candidate });
@@ -1131,16 +1137,21 @@ async function setupPeerConnection() {
 
     peerConnection.onconnectionstatechange = () => {
         const s = peerConnection ? peerConnection.connectionState : '';
+        console.log('WebRTC state:', s);
+        if (s === 'connected') {
+            inCall = true; updateCallBtn();
+        }
         if (s === 'disconnected' || s === 'failed' || s === 'closed') {
             if (inCall) { cleanupCall(); addChatMessage('📵 Call disconnected.', 'sys'); }
         }
     };
+}
 
-    // Caller creates and sends the offer
-    if (isCaller) {
-        const offer = await peerConnection.createOffer({ offerToReceiveAudio: true });
-        await peerConnection.setLocalDescription(offer);
-        socket.emit('webrtc_offer', { roomId: currentRoomId, offer });
+// ── Flush buffered ICE candidates after remoteDescription is set ──
+async function flushIceBuffer() {
+    while (iceCandidateBuffer.length > 0) {
+        const c = iceCandidateBuffer.shift();
+        try { await peerConnection.addIceCandidate(new RTCIceCandidate(c)); } catch(e) {}
     }
 }
 
@@ -1151,7 +1162,7 @@ function hangupCall() {
 }
 
 function cleanupCall() {
-    inCall = false; isCaller = false; isMuted = false;
+    inCall = false; isCaller = false; isMuted = false; iceCandidateBuffer = [];
     if (peerConnection) { try { peerConnection.close(); } catch(e){} peerConnection = null; }
     if (localStream) { localStream.getTracks().forEach(t => t.stop()); localStream = null; }
     const audio = document.getElementById('remote-audio');
