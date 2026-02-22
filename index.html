@@ -157,6 +157,24 @@
         .btn-newgame { background: #2196F3; }
         .btn-close { background: #333; }
 
+        /* ── VOICE BAR ── */
+        #voice-bar { display: none; background: #1b3a1b; border: 1px solid #2d6a2d; border-radius: 8px; padding: 6px 12px; margin: 4px 0; align-items: center; justify-content: space-between; gap: 8px; }
+        #voice-bar.show { display: flex; }
+        .voice-status { font-size: 12px; color: #66bb6a; display: flex; align-items: center; gap: 5px; }
+        .voice-dot { width: 8px; height: 8px; border-radius: 50%; background: #66bb6a; animation: pulse-green 1.2s ease-in-out infinite; }
+        .voice-btns { display: flex; gap: 6px; }
+        .voice-btns button { padding: 4px 9px; font-size: 12px; border-radius: 5px; border: none; color: white; cursor: pointer; font-weight: bold; }
+        .btn-mute { background: #555; }
+        .btn-mute.muted { background: #c62828; }
+        .btn-hangup { background: #c62828; }
+
+        /* ── INCOMING CALL POPUP ── */
+        #call-popup { display: none; position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%); background: #1b3a1b; border: 2px solid #4CAF50; border-radius: 14px; padding: 14px 20px; z-index: 1000; text-align: center; box-shadow: 0 4px 20px rgba(0,0,0,0.8); min-width: 260px; }
+        #call-popup.show { display: block; }
+        #call-popup p { margin: 0 0 10px; color: #ccc; font-size: 13px; }
+        #call-popup .call-btns { display: flex; gap: 10px; justify-content: center; }
+        #call-popup .call-btns button { padding: 9px 18px; border: none; border-radius: 6px; font-weight: bold; font-size: 13px; color: white; cursor: pointer; }
+
         /* ── INVITE POPUP ── */
         #invite-popup { display: none; position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: #1b3a1b; border: 2px solid #4CAF50; border-radius: 14px; padding: 14px 20px; z-index: 1000; text-align: center; box-shadow: 0 4px 20px rgba(0,0,0,0.8); min-width: 260px; }
         #invite-popup.show { display: block; }
@@ -228,8 +246,18 @@
 
     <div id="status">Tap below to connect or play locally</div>
 
+    <!-- Voice call bar (shown when in call) -->
+    <div id="voice-bar">
+        <div class="voice-status"><div class="voice-dot"></div><span id="voice-status-text">In call</span></div>
+        <div class="voice-btns">
+            <button class="btn-mute" id="mute-btn" onclick="toggleMute()">🎙 Mute</button>
+            <button class="btn-hangup" onclick="hangupCall()">📵 End</button>
+        </div>
+    </div>
+
     <div class="actions" id="game-actions" style="display:none;">
         <button onclick="flipBoard()" class="action-btn">🔄 Flip</button>
+        <button class="action-btn secondary" id="call-btn" onclick="startCall()" style="display:none;">📞 Call</button>
         <button class="action-btn" onclick="exportPGN()">📋 PGN</button>
         <button class="action-btn danger" onclick="resignGame()">🏳 Resign</button>
     </div>
@@ -368,6 +396,18 @@
     </div>
 </div>
 
+<!-- ═══ INCOMING CALL POPUP ═══ -->
+<div id="call-popup">
+    <p>📞 <b id="caller-name">Opponent</b> is calling…</p>
+    <div class="call-btns">
+        <button style="background:#4CAF50;" onclick="answerCall()">✅ Answer</button>
+        <button style="background:#f44336;" onclick="rejectCall()">❌ Decline</button>
+    </div>
+</div>
+
+<!-- Hidden audio for remote stream -->
+<audio id="remote-audio" autoplay playsinline></audio>
+
 <!-- ═══ INVITE POPUP ═══ -->
 <div id="invite-popup">
     <p>♟️ <b id="invite-from-name">?</b> challenged you!</p>
@@ -431,6 +471,18 @@ let chatOpen = false;
 // Friends
 let friendList = [];
 let isSpectating = false;
+
+// Voice call state
+let localStream = null, peerConnection = null, isMuted = false, inCall = false;
+
+// Free STUN servers (Google) — works for most connections globally
+const ICE_SERVERS = {
+    iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: 'stun:stun2.l.google.com:19302' }
+    ]
+};
 
 // Pending invite
 let pendingInvite = null; // {from, time}
@@ -527,6 +579,62 @@ function initSocket() {
     socket.on('rematch_decline', () => {
         addChatMessage((oppKey || 'Opponent') + ' declined rematch.', 'sys');
         closePopup();
+    });
+
+    // Rematch
+    socket.on('rematch_request', ({ time }) => {
+        showRematchOffer(time);
+    });
+    socket.on('rematch_accept', ({ time, yourColor }) => {
+        closePopup();
+        myColor = yourColor;
+        board.orientation(myColor === 'w' ? 'white' : 'black');
+        resetGame(time); updatePlayerLabels();
+        addChatMessage('Rematch started!', 'sys');
+    });
+    socket.on('rematch_decline', () => {
+        addChatMessage((oppKey || 'Opponent') + ' declined rematch.', 'sys');
+        closePopup();
+    });
+
+    // ── Voice Call Events ──
+    socket.on('voice_call_incoming', ({ from }) => {
+        document.getElementById('caller-name').textContent = from;
+        document.getElementById('call-popup').classList.add('show');
+    });
+
+    socket.on('voice_call_accepted', async () => {
+        addChatMessage('Call accepted! Connecting…', 'sys');
+        await startWebRTC(true); // we are the caller, so we create the offer
+    });
+
+    socket.on('voice_call_rejected', () => {
+        addChatMessage((oppKey || 'Opponent') + ' declined the call.', 'sys');
+        cleanupCall();
+    });
+
+    socket.on('voice_call_ended', () => {
+        addChatMessage((oppKey || 'Opponent') + ' ended the call.', 'sys');
+        cleanupCall();
+    });
+
+    // WebRTC signaling relay
+    socket.on('webrtc_offer', async ({ offer }) => {
+        if (!peerConnection) await startWebRTC(false);
+        await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+        const answer = await peerConnection.createAnswer();
+        await peerConnection.setLocalDescription(answer);
+        socket.emit('webrtc_answer', { roomId: currentRoomId, answer });
+    });
+
+    socket.on('webrtc_answer', async ({ answer }) => {
+        if (peerConnection) await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+    });
+
+    socket.on('webrtc_ice', async ({ candidate }) => {
+        if (peerConnection && candidate) {
+            try { await peerConnection.addIceCandidate(new RTCIceCandidate(candidate)); } catch (e) {}
+        }
     });
 
     // Presence updates
@@ -930,6 +1038,106 @@ function toggleDrawer() {
 }
 
 /* ══════════════════════════════════════════════
+   VOICE CALL (WebRTC via Socket.io signaling)
+══════════════════════════════════════════════ */
+async function startCall() {
+    if (!socket || !socket.connected || !currentRoomId) return alert('Connect to a friend first.');
+    if (inCall) return;
+    try {
+        localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    } catch (e) {
+        return alert('Microphone access denied. Please allow mic access and try again.');
+    }
+    socket.emit('voice_call_request', { roomId: currentRoomId });
+    addChatMessage('Calling ' + (oppKey || 'opponent') + '…', 'sys');
+    document.getElementById('call-btn').style.display = 'none';
+}
+
+async function answerCall() {
+    document.getElementById('call-popup').classList.remove('show');
+    try {
+        localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    } catch (e) {
+        return alert('Microphone access denied.');
+    }
+    socket.emit('voice_call_accept', { roomId: currentRoomId });
+    // WebRTC will be set up after caller receives voice_call_accepted
+}
+
+function rejectCall() {
+    document.getElementById('call-popup').classList.remove('show');
+    socket.emit('voice_call_reject', { roomId: currentRoomId });
+}
+
+async function startWebRTC(isCallerSide) {
+    peerConnection = new RTCPeerConnection(ICE_SERVERS);
+    inCall = true;
+
+    // Add local audio tracks
+    if (localStream) {
+        localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
+    }
+
+    // When remote audio arrives, play it
+    peerConnection.ontrack = (event) => {
+        const audio = document.getElementById('remote-audio');
+        audio.srcObject = event.streams[0];
+        document.getElementById('voice-status-text').textContent = 'In call with ' + (oppKey || 'opponent');
+        document.getElementById('voice-bar').classList.add('show');
+        document.getElementById('call-btn').style.display = 'none';
+        addChatMessage('🎙 Call connected!', 'sys');
+    };
+
+    // Send ICE candidates to the other side via server
+    peerConnection.onicecandidate = (event) => {
+        if (event.candidate) {
+            socket.emit('webrtc_ice', { roomId: currentRoomId, candidate: event.candidate });
+        }
+    };
+
+    peerConnection.onconnectionstatechange = () => {
+        if (peerConnection.connectionState === 'disconnected' || peerConnection.connectionState === 'failed') {
+            cleanupCall();
+            addChatMessage('Call disconnected.', 'sys');
+        }
+    };
+
+    // If caller, create and send the offer
+    if (isCallerSide) {
+        const offer = await peerConnection.createOffer();
+        await peerConnection.setLocalDescription(offer);
+        socket.emit('webrtc_offer', { roomId: currentRoomId, offer });
+    }
+}
+
+function hangupCall() {
+    socket.emit('voice_call_end', { roomId: currentRoomId });
+    cleanupCall();
+    addChatMessage('You ended the call.', 'sys');
+}
+
+function cleanupCall() {
+    inCall = false;
+    isMuted = false;
+    if (peerConnection) { peerConnection.close(); peerConnection = null; }
+    if (localStream) { localStream.getTracks().forEach(t => t.stop()); localStream = null; }
+    document.getElementById('remote-audio').srcObject = null;
+    document.getElementById('voice-bar').classList.remove('show');
+    document.getElementById('mute-btn').textContent = '🎙 Mute';
+    document.getElementById('mute-btn').classList.remove('muted');
+    if (currentRoomId) document.getElementById('call-btn').style.display = 'inline-block';
+}
+
+function toggleMute() {
+    if (!localStream) return;
+    isMuted = !isMuted;
+    localStream.getAudioTracks().forEach(t => t.enabled = !isMuted);
+    const btn = document.getElementById('mute-btn');
+    btn.textContent = isMuted ? '🔇 Unmute' : '🎙 Mute';
+    btn.classList.toggle('muted', isMuted);
+}
+
+/* ══════════════════════════════════════════════
    GAME MODE UI
 ══════════════════════════════════════════════ */
 function enterGameMode() {
@@ -938,6 +1146,7 @@ function enterGameMode() {
     document.getElementById('game-actions').style.display = 'flex';
     if (currentRoomId) {
         document.getElementById('chat-section').style.display = 'block';
+        document.getElementById('call-btn').style.display = 'inline-block';
         showScoreBar(true);
     }
 }
@@ -1201,6 +1410,8 @@ function closePopup() { document.getElementById('game-end-overlay').classList.re
 function startNewGame() {
     closePopup(); myColor = null; currentRoomId = null; oppKey = null;
     resetGame(0); score = { me: 0, draw: 0, opp: 0 }; updatePlayerLabels();
+    cleanupCall();
+    document.getElementById('call-btn').style.display = 'none';
     exitGameMode();
 }
 function requestRematch() {
