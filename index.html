@@ -1084,9 +1084,11 @@ async function startCall() {
         return alert('❌ Mic access denied. Please allow microphone and try again.');
     }
     isCaller = true;
+    inCall = true;
     iceBuffer = [];
     rtcConnected = false;
     fallbackMode = false;
+    updateCallBtn();
     socket.emit('voice_call_request', { roomId: currentRoomId });
     addChatMessage('📞 Calling ' + (oppKey || 'opponent') + '…', 'sys');
 }
@@ -1098,13 +1100,22 @@ async function answerCall() {
         localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
     } catch(e) { return alert('❌ Mic access denied.'); }
     isCaller   = false;
+    inCall     = true;
     iceBuffer  = [];
     rtcConnected = false;
     fallbackMode = false;
+    updateCallBtn();
     socket.emit('voice_call_accept', { roomId: currentRoomId });
     addChatMessage('📞 Accepted — connecting…', 'sys');
     // Callee sets up peer NOW so it's ready when offer arrives
     setupPeer();
+    // If WebRTC doesn't connect in 4s, start relay fallback on callee side too
+    fallbackTimer = setTimeout(() => {
+        if (!rtcConnected) {
+            console.warn('WebRTC timed out on callee side, switching to relay');
+            startFallback();
+        }
+    }, 4000);
 }
 
 function rejectCall() {
@@ -1126,13 +1137,13 @@ async function onCallAccepted() {
         } catch(e) { console.error('createOffer failed:', e); startFallback(); }
     }, 300);
 
-    // If not connected after 6s → fallback to server relay
+    // If not connected after 4s → fallback to server relay
     fallbackTimer = setTimeout(() => {
         if (!rtcConnected) {
             console.warn('WebRTC timed out, switching to server relay');
             startFallback();
         }
-    }, 6000);
+    }, 4000);
 }
 
 // ── Build RTCPeerConnection ──
@@ -1187,7 +1198,7 @@ function setupPeer() {
 
 // ── Fallback: stream audio chunks through server ──
 function startFallback() {
-    if (fallbackMode || !localStream || !inCall) return;
+    if (fallbackMode || !localStream) return;
     fallbackMode = true;
     console.log('📡 Using server relay for audio');
     setCallStatus('📡 Relayed call connected');
