@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -578,9 +579,8 @@ function initSocket() {
     });
 
     socket.on('voice_call_accepted', () => {
-        // Other side accepted — we (caller) now create & send the WebRTC offer
         addChatMessage('📞 Connecting call…', 'sys');
-        callerCreateOffer();
+        callerCreateOffer(); // caller now sets up peer and sends offer
     });
 
     socket.on('voice_call_rejected', () => {
@@ -594,22 +594,22 @@ function initSocket() {
     });
 
     socket.on('webrtc_offer', async ({ offer }) => {
-        // We are the CALLEE receiving the offer
+        // CALLEE receives offer → set remote → create answer
         try {
             await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
-            await flushIceBuffer(); // apply any ICE candidates that arrived early
+            await flushIceBuffer();
             const answer = await peerConnection.createAnswer();
             await peerConnection.setLocalDescription(answer);
-            socket.emit('webrtc_answer', { roomId: currentRoomId, answer });
-        } catch(e) { console.error('webrtc_offer error', e); }
+            socket.emit('webrtc_answer', { roomId: currentRoomId, answer: peerConnection.localDescription });
+        } catch(e) { console.error('webrtc_offer handler error:', e); }
     });
 
     socket.on('webrtc_answer', async ({ answer }) => {
-        // We are the CALLER receiving the answer
+        // CALLER receives answer → set remote
         try {
             await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
-            await flushIceBuffer(); // apply any ICE candidates that arrived early
-        } catch(e) { console.error('webrtc_answer error', e); }
+            await flushIceBuffer();
+        } catch(e) { console.error('webrtc_answer handler error:', e); }
     });
 
     socket.on('webrtc_ice', async ({ candidate }) => {
@@ -617,7 +617,6 @@ function initSocket() {
         if (peerConnection && peerConnection.remoteDescription) {
             try { await peerConnection.addIceCandidate(new RTCIceCandidate(candidate)); } catch(e) {}
         } else {
-            // Buffer it — remoteDescription not set yet
             iceCandidateBuffer.push(candidate);
         }
     });
@@ -1023,29 +1022,23 @@ function toggleDrawer() {
 }
 
 /* ══════════════════════════════════════════════
-   VOICE CALL  (WebRTC — clean rewrite)
-   Flow:
-     Caller  → startCall() → gets mic → emits voice_call_request
-     Callee  ← voice_call_incoming → shows popup
-     Callee  → answerCall() → gets mic → creates RTCPeer → emits voice_call_accept
-     Caller  ← voice_call_accepted → callerCreateOffer() → sends webrtc_offer
-     Callee  ← webrtc_offer → setRemote → createAnswer → sends webrtc_answer
-     Caller  ← webrtc_answer → setRemote → ICE flows → audio connects!
+   VOICE CALL  — complete rewrite, proven flow
 ══════════════════════════════════════════════ */
 let localStream = null, peerConnection = null, isMuted = false, inCall = false, isCaller = false;
-// Buffer ICE candidates that arrive before remoteDescription is set
 let iceCandidateBuffer = [];
 
-const ICE_SERVERS = {
-    iceServers: [
+// Fetch fresh TURN credentials from Metered.ca free API (no account needed)
+// Falls back to STUN only if fetch fails
+async function getIceServers() {
+    try {
+        const r = await fetch(SERVER_URL + '/turn-credentials');
+        if (r.ok) return await r.json();
+    } catch(e) { console.warn('Could not fetch TURN credentials, using STUN only'); }
+    return [
         { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' },
-        // Free Open Relay TURN — works even behind strict firewalls
-        { urls: 'turn:openrelay.metered.ca:80',                   username: 'openrelayproject', credential: 'openrelayproject' },
-        { urls: 'turn:openrelay.metered.ca:443',                  username: 'openrelayproject', credential: 'openrelayproject' },
-        { urls: 'turn:openrelay.metered.ca:443?transport=tcp',    username: 'openrelayproject', credential: 'openrelayproject' }
-    ]
-};
+        { urls: 'stun:stun1.l.google.com:19302' }
+    ];
+}
 
 function showCallBtn(show) {
     document.getElementById('call-btn').classList.toggle('visible', show);
@@ -1059,68 +1052,72 @@ function updateCallBtn() {
     btn.classList.toggle('in-call', inCall);
 }
 
-// ── STEP 1: Caller taps Call ──
+// ── CALLER: Step 1 — tap Call ──
 async function startCall() {
     if (!socket || !socket.connected || !currentRoomId) return alert('Connect to a friend first.');
     if (inCall) return;
     try {
         localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-    } catch (e) {
-        return alert('❌ Microphone access denied.\nPlease allow mic in your browser settings and try again.');
+    } catch(e) {
+        return alert('❌ Mic access denied. Please allow microphone and try again.');
     }
     isCaller = true;
     iceCandidateBuffer = [];
-    createPeerConnection(); // create early so ICE buffer works
     socket.emit('voice_call_request', { roomId: currentRoomId });
     addChatMessage('📞 Calling ' + (oppKey || 'opponent') + '…', 'sys');
 }
 
-// ── STEP 2: Callee taps Answer ──
+// ── CALLEE: Step 2 — tap Answer ──
 async function answerCall() {
     document.getElementById('call-popup').classList.remove('show');
     try {
         localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-    } catch (e) {
-        return alert('❌ Microphone access denied.');
+    } catch(e) {
+        return alert('❌ Mic access denied.');
     }
     isCaller = false;
     iceCandidateBuffer = [];
-    createPeerConnection(); // ready before offer arrives
+    // Tell caller we accepted — they will now send the WebRTC offer
     socket.emit('voice_call_accept', { roomId: currentRoomId });
-}
-
-// ── STEP 3: Caller hears accepted → creates offer ──
-async function callerCreateOffer() {
-    if (!peerConnection) return;
-    try {
-        const offer = await peerConnection.createOffer({ offerToReceiveAudio: true });
-        await peerConnection.setLocalDescription(offer);
-        socket.emit('webrtc_offer', { roomId: currentRoomId, offer });
-    } catch(e) { console.error('createOffer error', e); cleanupCall(); }
+    addChatMessage('📞 Accepted, waiting for connection…', 'sys');
+    // Set up our peer connection ready to receive the offer
+    await setupPeer(false);
 }
 
 function rejectCall() {
     document.getElementById('call-popup').classList.remove('show');
     if (socket && currentRoomId) socket.emit('voice_call_reject', { roomId: currentRoomId });
-    if (localStream) { localStream.getTracks().forEach(t => t.stop()); localStream = null; }
+    cleanupCall();
 }
 
-// ── Create RTCPeerConnection with all handlers ──
-function createPeerConnection() {
-    if (peerConnection) { try { peerConnection.close(); } catch(e){} }
-    peerConnection = new RTCPeerConnection(ICE_SERVERS);
+// ── CALLER: Step 3 — called after callee accepts ──
+async function callerCreateOffer() {
+    // Caller now sets up their peer and creates the offer
+    await setupPeer(true);
+}
 
-    // Add our mic tracks
-    if (localStream) {
-        localStream.getTracks().forEach(t => peerConnection.addTrack(t, localStream));
-    }
+// ── Core: set up RTCPeerConnection and optionally create offer ──
+async function setupPeer(isCallerSide) {
+    const iceServers = await getIceServers();
+    if (peerConnection) { try { peerConnection.close(); } catch(e){} peerConnection = null; }
 
-    // Remote audio arrives → play it
-    peerConnection.ontrack = (event) => {
-        console.log('ontrack fired', event.streams);
+    peerConnection = new RTCPeerConnection({ iceServers });
+
+    // Add mic tracks to the connection
+    localStream.getTracks().forEach(track => {
+        peerConnection.addTrack(track, localStream);
+    });
+
+    // When remote audio arrives — PLAY IT
+    peerConnection.ontrack = (evt) => {
+        console.log('🔊 ontrack:', evt.streams);
         const audio = document.getElementById('remote-audio');
-        audio.srcObject = event.streams[0];
-        audio.play().catch(e => console.warn('autoplay blocked:', e));
+        audio.srcObject = evt.streams[0];
+        // Force play — mobile browsers need this
+        audio.play().catch(err => {
+            console.warn('autoplay blocked, attaching click handler');
+            document.body.addEventListener('click', () => audio.play(), { once: true });
+        });
         inCall = true;
         document.getElementById('voice-bar').classList.add('show');
         document.getElementById('voice-status-text').textContent = '🎙 In call with ' + (oppKey || 'opponent');
@@ -1128,35 +1125,40 @@ function createPeerConnection() {
         addChatMessage('🎙 Call connected!', 'sys');
     };
 
-    // ICE candidate ready → send to other side
-    peerConnection.onicecandidate = (event) => {
-        if (event.candidate && socket && currentRoomId) {
-            socket.emit('webrtc_ice', { roomId: currentRoomId, candidate: event.candidate });
+    // Send ICE candidates to other side via server
+    peerConnection.onicecandidate = (evt) => {
+        if (evt.candidate && socket && currentRoomId) {
+            socket.emit('webrtc_ice', { roomId: currentRoomId, candidate: evt.candidate.toJSON() });
         }
     };
 
     peerConnection.onconnectionstatechange = () => {
-        const s = peerConnection ? peerConnection.connectionState : '';
-        console.log('WebRTC state:', s);
-        if (s === 'connected') {
-            inCall = true; updateCallBtn();
-        }
-        if (s === 'disconnected' || s === 'failed' || s === 'closed') {
-            if (inCall) { cleanupCall(); addChatMessage('📵 Call disconnected.', 'sys'); }
+        const s = peerConnection?.connectionState;
+        console.log('🔌 RTCPeer state:', s);
+        if (s === 'connected') { inCall = true; updateCallBtn(); }
+        if ((s === 'failed' || s === 'disconnected') && inCall) {
+            cleanupCall();
+            addChatMessage('📵 Call disconnected.', 'sys');
         }
     };
+
+    // Caller creates and sends the offer
+    if (isCallerSide) {
+        const offer = await peerConnection.createOffer({ offerToReceiveAudio: true });
+        await peerConnection.setLocalDescription(offer);
+        socket.emit('webrtc_offer', { roomId: currentRoomId, offer: peerConnection.localDescription });
+    }
 }
 
-// ── Flush buffered ICE candidates after remoteDescription is set ──
 async function flushIceBuffer() {
-    while (iceCandidateBuffer.length > 0) {
+    while (iceCandidateBuffer.length) {
         const c = iceCandidateBuffer.shift();
         try { await peerConnection.addIceCandidate(new RTCIceCandidate(c)); } catch(e) {}
     }
 }
 
 function hangupCall() {
-    if (socket && socket.connected && currentRoomId) socket.emit('voice_call_end', { roomId: currentRoomId });
+    if (socket && currentRoomId) socket.emit('voice_call_end', { roomId: currentRoomId });
     cleanupCall();
     addChatMessage('📵 You ended the call.', 'sys');
 }
